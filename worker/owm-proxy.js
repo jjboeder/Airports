@@ -21,6 +21,54 @@ export default {
       return new Response(resp.body, { status: resp.status, headers });
     }
 
+    // Route: /wind-grid?bbox=south,west,north,east&step=2
+    if (path === '/wind-grid') {
+      const bbox = (url.searchParams.get('bbox') || '').split(',').map(Number);
+      const step = parseFloat(url.searchParams.get('step')) || 2;
+      if (bbox.length !== 4 || bbox.some(isNaN)) {
+        return new Response(JSON.stringify({ error: 'bbox=south,west,north,east required' }), {
+          status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+        });
+      }
+      const [south, west, north, east] = bbox;
+      const points = [];
+      for (let lat = Math.ceil(south / step) * step; lat <= north; lat += step) {
+        for (let lon = Math.ceil(west / step) * step; lon <= east; lon += step) {
+          points.push({ lat: Math.round(lat * 1000) / 1000, lon: Math.round(lon * 1000) / 1000 });
+        }
+      }
+      if (points.length > 50) {
+        return new Response(JSON.stringify({ error: 'Too many grid points (' + points.length + '), increase step' }), {
+          status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+        });
+      }
+
+      const cache = caches.default;
+      const results = await Promise.all(points.map(async (pt) => {
+        const cacheKey = new Request('https://wind-cache/' + pt.lat + '/' + pt.lon);
+        let resp = await cache.match(cacheKey);
+        if (!resp) {
+          const upstream = `https://api.openweathermap.org/data/2.5/weather?lat=${pt.lat}&lon=${pt.lon}&appid=${env.OWM_KEY}&units=metric`;
+          resp = await fetch(upstream);
+          const body = await resp.text();
+          resp = new Response(body, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=600' } });
+          await cache.put(cacheKey, resp.clone());
+        }
+        const data = await resp.json();
+        if (!data.wind) return null;
+        return {
+          lat: pt.lat, lon: pt.lon,
+          wind_speed: data.wind.speed,
+          wind_deg: data.wind.deg || 0,
+          wind_gust: data.wind.gust || null
+        };
+      }));
+
+      return new Response(JSON.stringify(results.filter(Boolean)), {
+        headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+      });
+    }
+
     // Route: /weather?lat=...&lon=...
     if (path === '/weather') {
       const lat = url.searchParams.get('lat');

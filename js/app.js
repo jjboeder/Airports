@@ -101,11 +101,13 @@
 
   function createWeatherLayers() {
     var layers = {};
+    var tileUrl = OWM_PROXY + '/tile/{layer}/{z}/{x}/{y}.png';
     OWM_LAYERS.forEach(function (l) {
-      layers[l.label] = L.tileLayer(
-        OWM_PROXY + '/tile/' + l.id + '/{z}/{x}/{y}.png',
-        { opacity: 0.85, maxZoom: 18, attribution: '&copy; OpenWeatherMap' }
-      );
+      var url = tileUrl.replace('{layer}', l.id);
+      // Stack two copies: a dark backdrop + the weather tile on top for visibility
+      var backdrop = L.tileLayer(url, { opacity: 0.6, maxZoom: 18 });
+      var top = L.tileLayer(url, { opacity: 1, maxZoom: 18, attribution: '&copy; OpenWeatherMap' });
+      layers[l.label] = L.layerGroup([backdrop, top]);
     });
     return layers;
   }
@@ -226,6 +228,135 @@
     });
   }
 
+  // --- Wind barbs overlay ---
+
+  function windBarbSVG(speedKt, dirDeg) {
+    if (speedKt < 3) {
+      // Calm: two concentric circles
+      return '<svg viewBox="0 0 40 40" width="40" height="40">'
+        + '<circle cx="20" cy="20" r="6" fill="none" stroke="#333" stroke-width="2"/>'
+        + '<circle cx="20" cy="20" r="2" fill="#333"/>'
+        + '</svg>';
+    }
+    // Build barb elements along the staff
+    var barbs = [];
+    var remaining = Math.round(speedKt / 5) * 5; // round to nearest 5
+    var y = 4; // start at top of staff
+
+    // Pennants (50 kt)
+    while (remaining >= 50) {
+      barbs.push('<polygon points="20,' + y + ' 32,' + (y + 2) + ' 20,' + (y + 5) + '" fill="#333"/>');
+      y += 6;
+      remaining -= 50;
+    }
+    // Full barbs (10 kt)
+    while (remaining >= 10) {
+      barbs.push('<line x1="20" y1="' + y + '" x2="32" y2="' + (y - 3) + '" stroke="#333" stroke-width="2" stroke-linecap="round"/>');
+      y += 4;
+      remaining -= 10;
+    }
+    // Half barb (5 kt)
+    if (remaining >= 5) {
+      barbs.push('<line x1="20" y1="' + y + '" x2="26" y2="' + (y - 2) + '" stroke="#333" stroke-width="2" stroke-linecap="round"/>');
+    }
+    // Staff line
+    var staffBottom = 36;
+    var svg = '<svg viewBox="0 0 40 40" width="40" height="40">'
+      + '<g transform="rotate(' + dirDeg + ', 20, 20)">'
+      + '<line x1="20" y1="4" x2="20" y2="' + staffBottom + '" stroke="#333" stroke-width="2" stroke-linecap="round"/>'
+      + '<circle cx="20" cy="' + staffBottom + '" r="2.5" fill="#333"/>'
+      + barbs.join('')
+      + '</g></svg>';
+    return svg;
+  }
+
+  function windGridStep(zoom) {
+    if (zoom <= 4) return 5;
+    if (zoom <= 6) return 3;
+    if (zoom <= 8) return 1.5;
+    if (zoom <= 10) return 0.75;
+    return 0.3;
+  }
+
+  function setupWindBarbLayer(map, overlays) {
+    var barbDummyLayer = L.layerGroup(); // for layer control toggle
+    var barbMarkers = L.layerGroup();    // actual markers on map
+    var barbActive = false;
+    var fetchTimer = null;
+    var refreshTimer = null;
+
+    function msToKt(ms) { return Math.round(ms * 1.944); }
+
+    function clearBarbs() {
+      barbMarkers.clearLayers();
+    }
+
+    function fetchAndRenderBarbs() {
+      if (!barbActive) return;
+      var bounds = map.getBounds();
+      var step = windGridStep(map.getZoom());
+      var bbox = [
+        bounds.getSouth().toFixed(2),
+        bounds.getWest().toFixed(2),
+        bounds.getNorth().toFixed(2),
+        bounds.getEast().toFixed(2)
+      ].join(',');
+
+      fetch(OWM_PROXY + '/wind-grid?bbox=' + bbox + '&step=' + step)
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (!barbActive || !Array.isArray(data)) return;
+          clearBarbs();
+          for (var i = 0; i < data.length; i++) {
+            var pt = data[i];
+            var kt = msToKt(pt.wind_speed);
+            var svg = windBarbSVG(kt, pt.wind_deg);
+            var label = kt + 'kt';
+            var html = '<div class="wind-barb-icon">' + svg
+              + '<span class="wind-barb-label">' + label + '</span></div>';
+            var icon = L.divIcon({
+              className: 'wind-barb-marker',
+              html: html,
+              iconSize: [40, 54],
+              iconAnchor: [20, 20]
+            });
+            L.marker([pt.lat, pt.lon], { icon: icon, interactive: false }).addTo(barbMarkers);
+          }
+        })
+        .catch(function (err) {
+          console.error('Wind barb fetch error:', err);
+        });
+    }
+
+    function debouncedFetch() {
+      clearTimeout(fetchTimer);
+      fetchTimer = setTimeout(fetchAndRenderBarbs, 600);
+    }
+
+    map.on('overlayadd', function (e) {
+      if (e.layer === barbDummyLayer) {
+        barbActive = true;
+        map.addLayer(barbMarkers);
+        fetchAndRenderBarbs();
+        map.on('moveend', debouncedFetch);
+        refreshTimer = setInterval(fetchAndRenderBarbs, 10 * 60 * 1000);
+      }
+    });
+
+    map.on('overlayremove', function (e) {
+      if (e.layer === barbDummyLayer) {
+        barbActive = false;
+        map.off('moveend', debouncedFetch);
+        clearTimeout(fetchTimer);
+        clearInterval(refreshTimer);
+        clearBarbs();
+        map.removeLayer(barbMarkers);
+      }
+    });
+
+    overlays['Wind barbs'] = barbDummyLayer;
+  }
+
   function setupLayerControl() {
     const overlays = {};
 
@@ -247,6 +378,9 @@
     overlays['AMA Grid'] = amaLayer;
     overlays['Obstacles'] = obsLayer;
     loadAMAGrid(amaLayer, obsLayer);
+
+    // Wind barbs overlay
+    setupWindBarbLayer(map, overlays);
 
     // Airport layers will be added by airports.js via window.AirportApp
     window.AirportApp = window.AirportApp || {};

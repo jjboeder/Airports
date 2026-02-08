@@ -1203,6 +1203,28 @@
             });
           }
 
+          // Pre-fetch NOTAMs to show warning in title
+          var nameEl = el.querySelector('.popup-name');
+          if (icao && nameEl) {
+            var cachedNotam = notamCache[icao];
+            if (cachedNotam && !isNotamStale(icao)) {
+              if (cachedNotam.count > 0) {
+                nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + cachedNotam.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
+              }
+            } else {
+              fetchNotams(icao)
+                .then(function (json) {
+                  var data = parseNotamResponse(json);
+                  notamCache[icao] = data;
+                  notamCacheTime[icao] = Date.now();
+                  if (data.count > 0 && nameEl) {
+                    nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + data.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
+                  }
+                })
+                .catch(function () { /* silently skip */ });
+            }
+          }
+
           // Set range origin to the airport location (skip in route mode)
           var source = popup._source;
           if (source && source.getLatLng && window.AirportApp.setRangeOrigin && !window.AirportApp.routeMode) {

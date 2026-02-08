@@ -1257,6 +1257,17 @@ html, body {
   height: 12px;
 }
 
+/* NOTAM warning in popup title */
+.notam-warning {
+  color: #e67e22;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.notam-warning .notam-svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* AMA grid overlay labels */
 .ama-label {
   background: none !important;
@@ -1298,4 +1309,32 @@ html, body {
   font-style: italic;
   color: #333;
   padding: 2px 0;
+}
+
+/* Wind barb markers */
+.wind-barb-marker {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.wind-barb-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.wind-barb-label {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: #333;
+  text-shadow:
+    -1px -1px 0 rgba(255,255,255,0.9),
+     1px -1px 0 rgba(255,255,255,0.9),
+    -1px  1px 0 rgba(255,255,255,0.9),
+     1px  1px 0 rgba(255,255,255,0.9);
+  line-height: 1;
+  margin-top: -2px;
+  pointer-events: none;
 }
