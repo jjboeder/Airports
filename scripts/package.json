@@ -1,0 +1,11 @@
+{
+  "name": "airports-data-build",
+  "private": true,
+  "description": "Data build scripts for European Airports Map",
+  "scripts": {
+    "build": "node build-data.js"
+  },
+  "dependencies": {
+    "papaparse": "^5.4.1"
+  }
+}

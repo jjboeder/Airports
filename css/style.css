@@ -1,0 +1,1003 @@
+/* Reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+}
+
+/* Full-viewport map */
+#map {
+  width: 100%;
+  height: 100%;
+}
+
+/* Legend panel */
+.panel {
+  position: absolute;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+#legend {
+  bottom: 30px;
+  left: 10px;
+}
+
+#legend h3 {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #333;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: #444;
+}
+
+.legend-dot {
+  display: inline-block;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-section {
+  margin-top: 10px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #555;
+  border-top: 1px solid #ddd;
+  padding-top: 8px;
+}
+
+
+/* Airport marker - the leaflet wrapper div */
+.airport-marker {
+  background: none !important;
+  border: none !important;
+  overflow: visible !important;
+}
+
+/* Inner icon: dot + code side by side */
+.airport-icon {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.airport-dot {
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+
+.wx-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #fff;
+  line-height: 1;
+  padding: 0;
+  text-align: center;
+}
+
+.airport-code {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-weight: 700;
+  text-shadow:
+    -1px -1px 0 #fff,
+     1px -1px 0 #fff,
+    -1px  1px 0 #fff,
+     1px  1px 0 #fff,
+     0   -1px 0 #fff,
+     0    1px 0 #fff,
+    -1px  0   0 #fff,
+     1px  0   0 #fff;
+  pointer-events: none;
+  letter-spacing: 0.3px;
+}
+
+/* Popup styling */
+.airport-popup .leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+.airport-popup .leaflet-popup-content {
+  margin: 12px 16px;
+  line-height: 1.5;
+}
+
+.popup-content .popup-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: #222;
+  margin-bottom: 2px;
+}
+
+.popup-content .popup-codes {
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 4px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+.popup-content .popup-detail {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+/* METAR section in popup */
+.popup-metar {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+  font-size: 12px;
+}
+
+.metar-cat {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.metar-raw {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  color: #333;
+  word-break: break-all;
+  line-height: 1.4;
+  margin: 4px 0;
+}
+
+.metar-decoded {
+  font-size: 11px;
+  color: #555;
+  margin-top: 4px;
+}
+
+.metar-loading {
+  color: #999;
+  font-style: italic;
+}
+
+/* TAF forecast bar in popup */
+.popup-taf {
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+  font-size: 12px;
+}
+
+.taf-header {
+  font-weight: 700;
+  font-size: 11px;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.taf-table {
+  border-collapse: collapse;
+  width: auto;
+}
+
+.taf-table td {
+  padding: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.taf-row-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
+  text-align: right !important;
+  padding-right: 5px !important;
+  width: 24px;
+  white-space: nowrap;
+}
+
+.taf-td-label {
+  font-size: 10px;
+  color: #777;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  padding: 0 2px 1px !important;
+}
+
+.taf-row-cat td {
+  padding: 1px 2px !important;
+}
+
+.taf-hour {
+  width: 24px;
+  height: 20px;
+  border-radius: 3px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.taf-td-data {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 10px;
+  color: #666;
+  padding: 1px 2px !important;
+}
+
+.taf-raw {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  color: #333;
+  word-break: break-all;
+  line-height: 1.4;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Info grid: ATC, Fuel, Hours, Parking */
+.popup-info-grid {
+  margin: 8px 0;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 8px;
+}
+
+.info-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.info-row-freqs {
+  align-items: flex-start;
+}
+
+.info-label {
+  flex-shrink: 0;
+  width: 52px;
+  font-weight: 600;
+  color: #555;
+}
+
+.info-value {
+  color: #333;
+}
+
+.info-unknown {
+  color: #aaa;
+  font-style: italic;
+}
+
+/* ATC level badges */
+.atc-app  { color: #c0392b; font-weight: 600; }
+.atc-twr  { color: #2980b9; font-weight: 600; }
+.atc-afis { color: #8e44ad; font-weight: 600; }
+.atc-ctaf { color: #e67e22; font-weight: 600; }
+.atc-none { color: #888; }
+
+/* Frequency list */
+.freq-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.freq-item {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+  color: #555;
+}
+
+/* NOTAMs & AIP links row */
+.popup-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  padding: 8px 0;
+  border-top: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.popup-link {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.popup-link:hover {
+  opacity: 0.8;
+}
+
+.google-link {
+  background: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #17a2b8;
+}
+
+.oa-link {
+  background: #e2e3e5;
+  color: #383d41;
+  border: 1px solid #adb5bd;
+}
+
+.sv-link {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #28a745;
+}
+
+.ac-link {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+}
+
+.windy-link {
+  background: #e8f4fd;
+  color: #1a73a7;
+  border: 1px solid #4fc3f7;
+}
+
+.popup-content .popup-runways {
+  padding-top: 8px;
+}
+
+.popup-content .popup-runways-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+/* Runway table */
+.runway-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.runway-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #444;
+  padding: 3px 8px 3px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.runway-table td {
+  padding: 3px 8px 3px 0;
+  color: #555;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.runway-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* METAR category inline with airport code */
+.metar-cat-inline {
+  font-weight: 700;
+}
+
+/* Layer control styling */
+.leaflet-control-layers {
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* DA62 panel (Range + Route tabs) */
+#da62-panel {
+  position: fixed;
+  bottom: 30px;
+  right: 10px;
+  width: 280px;
+  z-index: 2000;
+}
+
+/* Panel tabs */
+.panel-tabs {
+  display: flex;
+  gap: 0;
+  margin: -12px -16px 10px -16px;
+  border-bottom: 1px solid #ddd;
+}
+
+.panel-tab {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #888;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.panel-tab:first-child {
+  border-radius: 8px 0 0 0;
+}
+
+.panel-tab:last-child {
+  border-radius: 0 8px 0 0;
+}
+
+.panel-tab:hover {
+  color: #555;
+}
+
+.panel-tab.active {
+  color: #2980b9;
+  border-bottom-color: #2980b9;
+}
+
+/* Tab content visibility */
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+.range-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.range-toggle-row label {
+  font-size: 12px;
+  color: #444;
+  cursor: pointer;
+  margin: 0 !important;
+}
+
+.range-toggle-row input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+#da62-panel .range-hint {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+#da62-panel label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 2px;
+  margin-top: 6px;
+}
+
+#da62-panel input[type="number"],
+#da62-panel select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+
+#da62-panel input[type="number"]:focus,
+#da62-panel select:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+#range-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  min-height: 18px;
+}
+
+.range-max {
+  color: #e74c3c;
+}
+
+.range-safe {
+  color: #27ae60;
+}
+
+#range-clear {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f8f9fa;
+  font-size: 12px;
+  font-family: inherit;
+  color: #555;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#range-clear:hover {
+  background: #e9ecef;
+}
+
+/* Weather detail popup */
+.wx-popup {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wx-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.wx-icon {
+  width: 48px;
+  height: 48px;
+}
+
+.wx-location {
+  font-weight: 700;
+  font-size: 14px;
+  color: #222;
+}
+
+.wx-desc {
+  font-size: 12px;
+  color: #666;
+  text-transform: capitalize;
+}
+
+.wx-details {
+  border-top: 1px solid #e0e0e0;
+  padding-top: 6px;
+}
+
+.wx-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+  font-size: 12px;
+}
+
+.wx-label {
+  flex-shrink: 0;
+  width: 60px;
+  font-weight: 600;
+  color: #555;
+}
+
+/* Route planner */
+.route-btn {
+  display: block;
+  width: 100%;
+  padding: 6px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f8f9fa;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.route-btn:hover:not(:disabled) {
+  background: #e9ecef;
+}
+
+.route-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.route-btn-start {
+  background: #2980b9;
+  color: #fff;
+  border-color: #2472a4;
+}
+
+.route-btn-start:hover:not(:disabled) {
+  background: #2472a4;
+}
+
+.route-btn-stop {
+  background: #e74c3c;
+  color: #fff;
+  border-color: #c0392b;
+}
+
+.route-btn-stop:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+.route-btn-sm {
+  display: inline-block;
+  width: auto;
+  flex: 1;
+  padding: 4px 0;
+  font-size: 11px;
+}
+
+.route-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+#route-settings {
+  font-size: 11px;
+  color: #666;
+  margin-top: 8px;
+}
+
+#route-waypoints {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.route-waypoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.route-wp-num {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #2980b9;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.route-wp-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.route-wp-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-wp-code {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  color: #2980b9;
+}
+
+.route-wp-remove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: none;
+  color: #aaa;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 18px;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.route-wp-remove:hover {
+  color: #e74c3c;
+  background: #fdecea;
+}
+
+.route-leg-info {
+  font-size: 11px;
+  color: #777;
+  padding: 2px 0 4px 24px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.route-leg-arrow {
+  color: #2980b9;
+  margin-right: 2px;
+}
+
+#route-totals {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.route-totals-line {
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 2px;
+}
+
+.route-remaining {
+  color: #27ae60;
+  font-weight: 600;
+}
+
+.route-fuel-warning {
+  color: #e74c3c !important;
+  font-weight: 700;
+}
+
+/* Route map markers */
+.route-number-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #2980b9;
+  color: #2980b9;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+.route-arrow-marker {
+  width: 12px;
+  height: 12px;
+  color: #2980b9;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Alternate airport */
+.route-wp-num-alt { background: #e67e22; }
+
+.route-alt-toggle {
+  flex-shrink: 0;
+  border: 1px solid #ddd;
+  background: #f8f9fa;
+  color: #888;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-right: 2px;
+}
+
+.route-alt-toggle:hover { border-color: #e67e22; color: #e67e22; }
+
+.route-alt-toggle.active {
+  background: #e67e22; color: #fff; border-color: #d35400;
+}
+
+.route-alt-separator {
+  border-top: 1px dashed #e67e22;
+  margin: 4px 0;
+  font-size: 10px;
+  color: #e67e22;
+  padding-top: 2px;
+}
+
+.route-number-marker-alt {
+  border-color: #e67e22; color: #e67e22;
+}
+
+.route-totals-sub { color: #888; font-weight: 400; font-size: 11px; }
+.route-totals-alt { color: #e67e22; font-weight: 600; }
+
+/* Weight & Balance */
+.wb-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #555;
+}
+
+.wb-row label {
+  flex-shrink: 0;
+  width: 68px;
+  font-size: 11px;
+  font-weight: 600;
+  margin: 0 !important;
+}
+
+.wb-input {
+  width: 52px;
+  padding: 3px 4px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  text-align: right;
+}
+
+.wb-input-sm { width: 56px; }
+
+.wb-input:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.wb-fuel-line {
+  font-size: 11px;
+  color: #666;
+  margin: 6px 0;
+  padding: 4px 0;
+  border-top: 1px solid #eee;
+}
+
+#wb-results {
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.wb-result-ok { color: #27ae60; font-weight: 600; }
+.wb-result-warn { color: #e74c3c; font-weight: 700; }
+
+#wb-envelope {
+  margin-top: 4px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+#wb-envelope svg { display: block; }
+
+/* Route flight info inputs */
+#route-flight-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+#route-flight-info label {
+  display: inline;
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  margin: 0 !important;
+}
+
+#route-flight-info input[type="text"],
+#route-flight-info input[type="number"] {
+  width: 72px;
+  padding: 3px 4px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+#route-flight-info input[type="number"] {
+  width: 52px;
+  text-align: right;
+}
+
+/* Route weather badge inline with waypoint */
+.route-wp-wx {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.route-wp-wx-none {
+  background: #ccc;
+  color: #888;
+  font-size: 9px;
+}
+
+/* GRAMET link button */
+.route-gramet-link {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  background: #e8f4fd;
+  color: #1a73a7;
+  border: 1px solid #4fc3f7;
+  transition: opacity 0.15s;
+}
+
+.route-gramet-link:hover {
+  opacity: 0.8;
+}
+
+/* Wind indicator badges */
+.wind-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #e67e22;
+  color: #fff;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+.taf-wind-dot {
+  color: #e67e22;
+  display: inline-flex;
+  align-items: center;
+}
+
+.wind-svg {
+  width: 14px;
+  height: 10px;
+}

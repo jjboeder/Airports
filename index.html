@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>European Airports Map</title>
+
+  <!-- Leaflet 1.9.4 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="legend" class="panel">
+    <h3>Airport Types</h3>
+    <div class="legend-item">
+      <span class="legend-dot" style="background:#e74c3c; width:12px; height:12px;"></span>
+      Large airport
+    </div>
+    <div class="legend-item">
+      <span class="legend-dot" style="background:#3498db; width:9px; height:9px;"></span>
+      Medium airport
+    </div>
+    <div class="legend-item">
+      <span class="legend-dot" style="background:#27ae60; width:6px; height:6px;"></span>
+      Small airport
+    </div>
+    <h3 class="legend-section">METAR Layer</h3>
+    <div class="legend-item">
+      <input type="checkbox" id="wx-filter-toggle">
+      <label for="wx-filter-toggle" style="font-size:11px;color:#444;cursor:pointer;margin:0;">Hide IFR/LIFR airports</label>
+    </div>
+    <div class="legend-item">
+      <span style="color:#27ae60;font-weight:700;font-family:monospace;font-size:11px;width:38px;display:inline-block;">VFR</span>
+      &gt;3000 ft / &gt;8 km
+    </div>
+    <div class="legend-item">
+      <span style="color:#3498db;font-weight:700;font-family:monospace;font-size:11px;width:38px;display:inline-block;">MVFR</span>
+      1000–3000 ft / 5–8 km
+    </div>
+    <div class="legend-item">
+      <span style="color:#e67e22;font-weight:700;font-family:monospace;font-size:11px;width:38px;display:inline-block;">BIR</span>
+      600–999 ft / 1.5–5 km
+    </div>
+    <div class="legend-item">
+      <span style="color:#e74c3c;font-weight:700;font-family:monospace;font-size:11px;width:38px;display:inline-block;">IFR</span>
+      500–599 ft / &ge;1.5 km
+    </div>
+    <div class="legend-item">
+      <span style="color:#9b59b6;font-weight:700;font-family:monospace;font-size:11px;width:38px;display:inline-block;">LIFR</span>
+      &lt;500 ft / &lt;1.5 km
+    </div>
+  </div>
+
+  <div id="da62-panel" class="panel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-tab="tab-range">Range</button>
+      <button class="panel-tab" data-tab="tab-route">Route</button>
+      <button class="panel-tab" data-tab="tab-wb">W&B</button>
+    </div>
+
+    <div id="tab-range" class="tab-content active">
+      <div class="range-toggle-row">
+        <input type="checkbox" id="range-toggle">
+        <label for="range-toggle">Show range circles</label>
+      </div>
+      <div class="range-hint">Click map or airport to set departure</div>
+      <label for="range-fuel">Fuel (US gal)</label>
+      <input type="number" id="range-fuel" value="86" max="86" min="0" step="0.1">
+      <label for="range-power">Power setting</label>
+      <select id="range-power"></select>
+      <div id="range-summary"></div>
+      <button id="range-clear">Clear</button>
+    </div>
+
+    <div id="tab-route" class="tab-content">
+      <button id="route-toggle" class="route-btn route-btn-start">Start Route</button>
+      <div id="route-settings"></div>
+      <div id="route-flight-info">
+        <label for="route-dep-time">Dep UTC</label>
+        <input type="text" id="route-dep-time" maxlength="5" placeholder="HH:MM" pattern="\d{2}:\d{2}">
+        <label for="route-fl">FL</label>
+        <input type="number" id="route-fl" value="80" min="10" max="250" step="10">
+      </div>
+      <div id="route-waypoints"></div>
+      <div id="route-totals"></div>
+      <div class="route-actions">
+        <button id="route-undo" class="route-btn route-btn-sm" disabled>Undo Last</button>
+        <button id="route-clear" class="route-btn route-btn-sm" disabled>Clear Route</button>
+      </div>
+    </div>
+
+    <div id="tab-wb" class="tab-content">
+      <div class="wb-row wb-row-header">
+        <label>Empty</label>
+        <input type="number" id="wb-empty-wt" value="1687" step="1" class="wb-input"> kg
+        <input type="number" id="wb-empty-cg" value="2.374" step="0.001" class="wb-input wb-input-sm"> m
+      </div>
+      <div class="wb-row">
+        <label>TKS fluid</label>
+        <input type="number" id="wb-deice" value="" placeholder="0" step="0.1" class="wb-input"> kg
+      </div>
+      <div class="wb-row">
+        <label>Front L/R</label>
+        <input type="number" id="wb-front-l" value="90" placeholder="0" step="1" class="wb-input">
+        <input type="number" id="wb-front-r" value="" placeholder="0" step="1" class="wb-input"> kg
+      </div>
+      <div class="wb-row">
+        <label>Rear L/R</label>
+        <input type="number" id="wb-row1-l" value="" placeholder="0" step="1" class="wb-input">
+        <input type="number" id="wb-row1-r" value="" placeholder="0" step="1" class="wb-input"> kg
+      </div>
+      <div class="wb-row">
+        <label>Nose RH/LH</label>
+        <input type="number" id="wb-nose-rh" value="" placeholder="0" step="0.1" class="wb-input">
+        <input type="number" id="wb-nose-lh" value="" placeholder="0" step="0.1" class="wb-input"> kg
+      </div>
+      <div class="wb-row">
+        <label>Tail A</label>
+        <input type="number" id="wb-tail-a" value="" placeholder="0" step="0.1" class="wb-input"> kg
+      </div>
+      <div class="wb-row">
+        <label>Tail B/C/D</label>
+        <input type="number" id="wb-tail-bcd" value="" placeholder="0" step="0.1" class="wb-input"> kg
+      </div>
+      <div id="wb-fuel-display" class="wb-fuel-line">Fuel: 0 gal · 0 kg</div>
+      <div id="wb-results"></div>
+      <div id="wb-envelope"></div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script src="js/airports.js"></script>
+  <script src="js/fuel-calculator.js"></script>
+  <script src="js/route-planner.js"></script>
+  <script src="js/weight-balance.js"></script>
+</body>
+</html>
