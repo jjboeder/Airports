@@ -14,6 +14,9 @@ html, body {
 #map {
   width: 100%;
   height: 100%;
+  /* PWA safe area for notch/home indicator */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* Legend panel */
@@ -25,6 +28,88 @@ html, body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   padding: 12px 16px;
   font-size: 13px;
+}
+
+/* Airport search box */
+#airport-search {
+  top: 12px;
+  left: 54px;
+  z-index: 1000;
+  padding: 0;
+  overflow: visible;
+}
+
+#search-input {
+  width: 220px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: transparent;
+  outline: none;
+  color: #333;
+}
+
+#search-input::placeholder {
+  color: #999;
+}
+
+#search-results {
+  display: none;
+  max-height: 360px;
+  overflow-y: auto;
+  border-top: 1px solid #e0e0e0;
+}
+
+#search-results.visible {
+  display: block;
+}
+
+.search-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  min-height: 40px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.search-item:hover,
+.search-item.active {
+  background: #f0f4ff;
+}
+
+.search-item-code {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-weight: 700;
+  font-size: 13px;
+  color: #2980b9;
+  flex-shrink: 0;
+  width: 48px;
+}
+
+.search-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-item-city {
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #legend {
@@ -61,6 +146,13 @@ html, body {
   padding-top: 8px;
 }
 
+
+/* Airport tooltip */
+.leaflet-tooltip {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 4px 8px;
+}
 
 /* Airport marker - the leaflet wrapper div */
 .airport-marker {
@@ -184,6 +276,19 @@ html, body {
 .metar-loading {
   color: #999;
   font-style: italic;
+}
+
+/* TAF toggle link */
+.popup-taf-toggle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2980b9;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.popup-taf-toggle:hover {
+  text-decoration: underline;
 }
 
 /* TAF forecast bar in popup */
@@ -802,6 +907,17 @@ html, body {
   font-weight: 700;
 }
 
+.route-terrain-warning {
+  color: #e74c3c;
+  font-weight: 700;
+  margin-top: 4px;
+  padding: 4px 6px;
+  background: #fdecea;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* Route map markers */
 .route-number-marker {
   width: 22px;
@@ -894,6 +1010,12 @@ html, body {
 }
 
 .wb-input-sm { width: 56px; }
+
+.wb-max {
+  font-size: 9px;
+  color: #aaa;
+  white-space: nowrap;
+}
 
 .wb-input:focus {
   outline: none;
@@ -1016,7 +1138,164 @@ html, body {
   align-items: center;
 }
 
+.taf-ice-dot {
+  color: #5dade2;
+  display: inline-flex;
+  align-items: center;
+}
+
 .wind-svg {
   width: 14px;
   height: 10px;
+}
+
+/* Icing indicator badges */
+.ice-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #5dade2;
+  color: #fff;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+.ice-svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* NOTAM toggle link */
+.popup-notam-toggle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c0392b;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.popup-notam-toggle:hover {
+  text-decoration: underline;
+}
+
+/* NOTAM section in popup */
+.popup-notam {
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  background: #fef9e7;
+  border-radius: 6px;
+  border: 1px solid #f0e0a0;
+  font-size: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.notam-header {
+  font-size: 12px;
+  color: #856404;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.notam-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notam-item {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #333;
+  padding: 4px 6px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 3px;
+  border-left: 3px solid #e0c860;
+}
+
+.notam-critical {
+  border-left-color: #e74c3c;
+  background: #fdecea;
+}
+
+.notam-id {
+  font-weight: 700;
+  font-size: 10px;
+  color: #555;
+  margin-bottom: 1px;
+}
+
+.notam-text {
+  word-break: break-word;
+}
+
+/* NOTAM badge (route planner) */
+.notam-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #f0ad4e;
+  color: #fff;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+.notam-badge-critical {
+  background: #e74c3c;
+}
+
+/* NOTAM SVG icon */
+.notam-svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* AMA grid overlay labels */
+.ama-label {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  font-style: italic;
+  color: #444;
+  text-shadow:
+    -1px -1px 0 rgba(255,255,255,0.85),
+     1px -1px 0 rgba(255,255,255,0.85),
+    -1px  1px 0 rgba(255,255,255,0.85),
+     1px  1px 0 rgba(255,255,255,0.85),
+     0   -1px 0 rgba(255,255,255,0.85),
+     0    1px 0 rgba(255,255,255,0.85);
+  text-align: center;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.ama-label sup {
+  font-size: 0.7em;
+  vertical-align: super;
+  line-height: 0;
+}
+
+/* AMA obstacle markers */
+.obs-marker {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* AMA popup on cell click */
+.ama-popup-content {
+  font-size: 13px;
+  font-style: italic;
+  color: #333;
+  padding: 2px 0;
 }

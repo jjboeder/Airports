@@ -59,6 +59,74 @@
   // Inline SVG wind icon (two flowing lines with curls)
   var WIND_SVG = '<svg class="wind-svg" viewBox="0 0 24 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M1 4h11a3 3 0 1 0-3-3"/><path d="M1 10h15a3 3 0 1 1-3 3"/></svg>';
 
+  // Inline SVG ice crystal icon
+  var ICE_SVG = '<svg class="ice-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="1" x2="8" y2="15"/><line x1="1" y1="8" x2="15" y2="8"/><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/><line x1="8" y1="1" x2="6" y2="3"/><line x1="8" y1="1" x2="10" y2="3"/><line x1="8" y1="15" x2="6" y2="13"/><line x1="8" y1="15" x2="10" y2="13"/></svg>';
+
+  // Inline SVG NOTAM exclamation triangle icon (amber warning)
+  var NOTAM_SVG = '<svg class="notam-svg" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l7 14H1L8 1zm0 4v5h0V5zm0 7a1 1 0 100-2 1 1 0 000 2z"/></svg>';
+
+  // NOTAM API (FAA NOTAM Search — requires CORS proxy for POST)
+  var NOTAM_API = 'https://notams.aim.faa.gov/notamSearch/search';
+
+  // NOTAM cache: icao → parsed notam data
+  var notamCache = {};
+  var notamCacheTime = {};
+  var NOTAM_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
+
+  function isNotamStale(icao) {
+    var t = notamCacheTime[icao];
+    return !t || (Date.now() - t > NOTAM_CACHE_MAX_AGE);
+  }
+
+  // --- Fetch NOTAMs via POST through CORS proxy ---
+  function fetchNotams(icao) {
+    var body = 'searchType=0&designatorsForLocation=' + encodeURIComponent(icao);
+    var proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(NOTAM_API);
+
+    return fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    })
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .catch(function () {
+      // Fallback: try GET with query params
+      var getUrl = NOTAM_API + '?searchType=0&designatorsForLocation=' + encodeURIComponent(icao);
+      var getProxy = 'https://corsproxy.io/?' + encodeURIComponent(getUrl);
+      return fetch(getProxy).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      });
+    });
+  }
+
+  // --- Parse and classify NOTAMs ---
+  var NOTAM_CRITICAL_RE = /\b(CLSD|CLOSED|RESTRICTED|PROHIBITED|DANGER)\b/i;
+  var NOTAM_NAVAID_US_RE = /\b(ILS|VOR|NDB|DME|LOC|GP)\b.*\bU\/S\b/i;
+
+  function parseNotamResponse(json) {
+    var result = { count: 0, hasCritical: false, notams: [] };
+    if (!json || !json.notamList) return result;
+
+    var list = json.notamList;
+    result.count = json.totalNotamCount || list.length;
+
+    for (var i = 0; i < list.length; i++) {
+      var raw = list[i];
+      var text = raw.icaoMessage || raw.traditionalMessage || raw.notamText || '';
+      if (!text && typeof raw === 'string') text = raw;
+      var id = raw.notamNumber || raw.id || ('NOTAM-' + (i + 1));
+      var isCritical = NOTAM_CRITICAL_RE.test(text) || NOTAM_NAVAID_US_RE.test(text);
+      if (isCritical) result.hasCritical = true;
+      result.notams.push({ id: id, text: text, isCritical: isCritical });
+    }
+
+    return result;
+  }
+
   // Shared flight category calculator
   function calcFlightCat(ceilingFt, visM) {
     var c = ceilingFt != null ? ceilingFt : 99999;
@@ -140,10 +208,82 @@
       if (am) { result.altim = Math.round(parseInt(am[1], 10) / 100 * 33.8639); break; }
     }
 
+    // Weather phenomena: [+-]?(VC)?(MI|BC|PR|DR|BL|SH|TS|FZ)?(DZ|RA|SN|SG|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+
+    var wxPattern = /^([+-]?)(?:VC)?((?:MI|BC|PR|DR|BL|SH|TS|FZ)?(?:DZ|RA|SN|SG|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+)$/;
+    var wx = [];
+    for (var i = 0; i < tokens.length; i++) {
+      if (wxPattern.test(tokens[i])) {
+        wx.push(tokens[i]);
+      }
+    }
+    result.wx = wx;
+
     // Flight category based on ceiling and visibility
     result.fltCat = calcFlightCat(ceiling, visM);
 
     return result;
+  }
+
+  // Icing risk detection
+  function isIcingRisk(metar) {
+    if (!metar) return false;
+
+    // Severe icing: freezing rain or freezing drizzle — always flag
+    var wx = metar.wx || [];
+    for (var i = 0; i < wx.length; i++) {
+      if (wx[i].indexOf('FZ') >= 0) return true;
+    }
+
+    var temp = metar.temp;
+    if (temp == null) return false;
+
+    // Temperature must be in icing range: -20°C to +2°C
+    if (temp < -20 || temp > 2) return false;
+
+    // Check for precipitation
+    var precipTypes = ['RA', 'SN', 'DZ', 'PL', 'SG', 'GR', 'GS'];
+    for (var i = 0; i < wx.length; i++) {
+      for (var j = 0; j < precipTypes.length; j++) {
+        if (wx[i].indexOf(precipTypes[j]) >= 0) return true;
+      }
+    }
+
+    // Check for low clouds with near-saturation (temp/dewpoint spread ≤ 3°C)
+    var ceiling = metar.ceiling;
+    var dewp = metar.dewp;
+    if (ceiling != null && ceiling <= 5000 && dewp != null) {
+      if (Math.abs(temp - dewp) <= 3) return true;
+    }
+
+    return false;
+  }
+
+  // Icing risk from TAF hourly data: uses wxStr + ceiling, with METAR temp as proxy
+  function isTafHourIcingRisk(hour, metarTemp, metarDewp) {
+    if (!hour || !hour.wxStr) {
+      // No weather string — check low cloud + near-saturation with METAR temp
+      if (metarTemp != null && metarTemp >= -20 && metarTemp <= 2 &&
+          hour && hour.ceiling != null && hour.ceiling <= 5000 &&
+          metarDewp != null && Math.abs(metarTemp - metarDewp) <= 3) {
+        return true;
+      }
+      return false;
+    }
+    var wx = hour.wxStr;
+    // Freezing precip always flags
+    if (wx.indexOf('FZ') >= 0) return true;
+    // Other precip needs icing-range temp (use METAR as proxy)
+    if (metarTemp == null) return false;
+    if (metarTemp < -20 || metarTemp > 2) return false;
+    var precipTypes = ['RA', 'SN', 'DZ', 'PL', 'SG', 'GR', 'GS'];
+    for (var i = 0; i < precipTypes.length; i++) {
+      if (wx.indexOf(precipTypes[i]) >= 0) return true;
+    }
+    // Low clouds + near-saturation
+    if (hour.ceiling != null && hour.ceiling <= 5000 && metarDewp != null && Math.abs(metarTemp - metarDewp) <= 3) {
+      return true;
+    }
+    return false;
   }
 
   // ATC level display config
@@ -280,10 +420,13 @@
     html += '<span class="metar-loading">Loading METAR...</span>';
     html += '</div>';
 
-    // --- TAF forecast (loaded dynamically) ---
-    html += '<div class="popup-taf" data-icao="' + escapeHtml(gpsCode || ident) + '">';
-    html += '<span class="metar-loading">Loading TAF...</span>';
-    html += '</div>';
+    // --- TAF forecast (hidden by default, revealed on click) ---
+    html += '<div class="popup-taf-toggle" data-icao="' + escapeHtml(gpsCode || ident) + '">Show TAF</div>';
+    html += '<div class="popup-taf" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;"></div>';
+
+    // --- NOTAMs (hidden by default, revealed on click) ---
+    html += '<div class="popup-notam-toggle" data-icao="' + escapeHtml(gpsCode || ident) + '">Show NOTAMs</div>';
+    html += '<div class="popup-notam" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;"></div>';
 
     // --- Info grid ---
     html += '<div class="popup-info-grid">';
@@ -361,6 +504,9 @@
     if (isStrongWind(metar.wspd, metar.wgst)) {
       html += ' <span class="wind-badge">' + WIND_SVG + '</span>';
     }
+    if (isIcingRisk(metar)) {
+      html += ' <span class="ice-badge">' + ICE_SVG + '</span>';
+    }
     html += '<div class="metar-raw">' + escapeHtml(metar.rawOb) + '</div>';
 
     // Decoded summary
@@ -379,6 +525,7 @@
     } else if (metar.clouds && metar.clouds.length === 0) {
       parts.push('Ceil: CLR');
     }
+    if (metar.wx && metar.wx.length > 0) parts.push('Wx: ' + metar.wx.join(' '));
     if (metar.temp != null) parts.push('Temp: ' + metar.temp + '&deg;C');
     if (metar.dewp != null) parts.push('Dew: ' + metar.dewp + '&deg;C');
     if (metar.altim != null) parts.push('QNH: ' + metar.altim + ' hPa');
@@ -486,9 +633,10 @@
       var ceiling = tafCeiling(active.clouds);
       var cat = calcFlightCat(ceiling, visM);
 
-      // Extract wind from active forecast
+      // Extract wind and weather from active forecast
       var wspd = active.wspd != null ? active.wspd : (initialBase && initialBase !== active ? initialBase.wspd : null);
       var wgst = active.wgst != null ? active.wgst : (initialBase && initialBase !== active ? initialBase.wgst : null);
+      var wxStr = active.wxString || (initialBase && initialBase !== active ? initialBase.wxString : null) || '';
 
       // Apply TEMPO, PROB, and transitioning BECMG overlays — use worst-case category and wind
       for (var i = 0; i < fcsts.length; i++) {
@@ -514,9 +662,11 @@
         // Worst-case wind from overlays
         if (f.wspd != null && (wspd === null || f.wspd > wspd)) wspd = f.wspd;
         if (f.wgst != null && (wgst === null || f.wgst > wgst)) wgst = f.wgst;
+        // Merge weather strings from overlays
+        if (f.wxString) wxStr = wxStr ? wxStr + ' ' + f.wxString : f.wxString;
       }
 
-      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wspd: wspd, wgst: wgst });
+      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wspd: wspd, wgst: wgst, wxStr: wxStr });
     }
 
     return hours;
@@ -536,11 +686,19 @@
     return (m / 1000).toFixed(1);
   }
 
-  function renderTafInPopup(el, hours, rawTaf) {
+  function renderTafInPopup(el, hours, rawTaf, icao) {
     if (!hours || hours.length === 0) {
       el.innerHTML = '<span class="info-unknown">No TAF available</span>';
       return;
     }
+
+    // Get METAR temp/dewp as proxy for icing detection
+    var mTemp = null, mDewp = null;
+    if (icao && metarCache[icao]) {
+      mTemp = metarCache[icao].temp;
+      mDewp = metarCache[icao].dewp;
+    }
+
     var html = '<div class="taf-header">TAF</div>';
     html += '<table class="taf-table"><tbody>';
     // Hour row
@@ -589,6 +747,20 @@
       }
       html += '</tr>';
     }
+    // Icing row
+    var hasAnyIce = hours.some(function (h) { return h.cat && isTafHourIcingRisk(h, mTemp, mDewp); });
+    if (hasAnyIce) {
+      html += '<tr class="taf-row-data"><td class="taf-row-label">ICE</td>';
+      for (var i = 0; i < hours.length; i++) {
+        if (!hours[i].cat) continue;
+        if (isTafHourIcingRisk(hours[i], mTemp, mDewp)) {
+          html += '<td class="taf-td-data"><span class="taf-ice-dot">' + ICE_SVG + '</span></td>';
+        } else {
+          html += '<td class="taf-td-data"></td>';
+        }
+      }
+      html += '</tr>';
+    }
     html += '</tbody></table>';
     if (rawTaf) {
       html += '<div class="taf-raw">' + escapeHtml(rawTaf) + '</div>';
@@ -627,7 +799,7 @@
   function fetchTafForPopup(el, icao) {
     if (tafCache[icao] && !isStale(tafCacheTime, icao)) {
       var hours = computeHourlyCategories(tafCache[icao]);
-      renderTafInPopup(el, hours, getRawTaf(tafCache[icao]));
+      renderTafInPopup(el, hours, getRawTaf(tafCache[icao]), icao);
       return;
     }
     el.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
@@ -641,10 +813,48 @@
         tafCache[icao] = json;
         tafCacheTime[icao] = Date.now();
         var hours = computeHourlyCategories(json);
-        renderTafInPopup(el, hours, getRawTaf(json));
+        renderTafInPopup(el, hours, getRawTaf(json), icao);
       })
       .catch(function () {
         el.innerHTML = '<span class="info-unknown">TAF unavailable</span>';
+      });
+  }
+
+  // --- NOTAM popup rendering ---
+  function renderNotamInPopup(el, data) {
+    if (!data || data.count === 0) {
+      el.innerHTML = '<span class="info-unknown">No active NOTAMs</span>';
+      return;
+    }
+
+    var html = '<div class="notam-header">' + NOTAM_SVG + ' <strong>' + data.count + ' NOTAM' + (data.count > 1 ? 's' : '') + '</strong></div>';
+    html += '<div class="notam-list">';
+    for (var i = 0; i < data.notams.length; i++) {
+      var n = data.notams[i];
+      html += '<div class="notam-item' + (n.isCritical ? ' notam-critical' : '') + '">';
+      html += '<div class="notam-id">' + escapeHtml(n.id) + '</div>';
+      html += '<div class="notam-text">' + escapeHtml(n.text) + '</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  function fetchNotamForPopup(el, icao) {
+    if (notamCache[icao] && !isNotamStale(icao)) {
+      renderNotamInPopup(el, notamCache[icao]);
+      return;
+    }
+    el.innerHTML = '<span class="metar-loading">Loading NOTAMs...</span>';
+    fetchNotams(icao)
+      .then(function (json) {
+        var data = parseNotamResponse(json);
+        notamCache[icao] = data;
+        notamCacheTime[icao] = Date.now();
+        renderNotamInPopup(el, data);
+      })
+      .catch(function () {
+        el.innerHTML = '<span class="info-unknown">NOTAMs unavailable</span>';
       });
   }
 
@@ -894,6 +1104,11 @@
             className: 'airport-popup'
           });
 
+          var tip = code + ' ' + (row[COL.name] || '');
+          if (row[COL.municipality]) tip += ' · ' + row[COL.municipality];
+          if (row[COL.elevation]) tip += ' · ' + row[COL.elevation] + ' ft';
+          marker.bindTooltip(tip, { direction: 'top', offset: [0, -6] });
+
           marker._airportData = row;
           marker._airportType = type;
           marker._airportCode = code;
@@ -960,10 +1175,32 @@
           var icao = metarDiv.getAttribute('data-icao');
           if (icao) fetchMetarForPopup(metarDiv, icao);
 
+          var tafToggle = el.querySelector('.popup-taf-toggle');
           var tafDiv = el.querySelector('.popup-taf');
-          if (tafDiv) {
-            var tafIcao = tafDiv.getAttribute('data-icao');
-            if (tafIcao) fetchTafForPopup(tafDiv, tafIcao);
+          if (tafToggle && tafDiv) {
+            tafToggle.addEventListener('click', function () {
+              tafDiv.style.display = '';
+              tafToggle.style.display = 'none';
+              var tafIcao = tafDiv.getAttribute('data-icao');
+              if (tafIcao) {
+                tafDiv.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
+                fetchTafForPopup(tafDiv, tafIcao);
+              }
+            });
+          }
+
+          var notamToggle = el.querySelector('.popup-notam-toggle');
+          var notamDiv = el.querySelector('.popup-notam');
+          if (notamToggle && notamDiv) {
+            notamToggle.addEventListener('click', function () {
+              notamDiv.style.display = '';
+              notamToggle.style.display = 'none';
+              var notamIcao = notamDiv.getAttribute('data-icao');
+              if (notamIcao) {
+                notamDiv.innerHTML = '<span class="metar-loading">Loading NOTAMs...</span>';
+                fetchNotamForPopup(notamDiv, notamIcao);
+              }
+            });
           }
 
           // Set range origin to the airport location (skip in route mode)
@@ -975,6 +1212,8 @@
 
         app.typeLayers = typeLayers;
         app.airportData = data;
+        app.markersByIcao = markersByIcao;
+        app.COL = COL;
 
         console.log('Airport markers ready');
       })
@@ -1001,6 +1240,14 @@
   window.AirportApp.METAR_LETTER = METAR_LETTER;
   window.AirportApp.isStrongWind = isStrongWind;
   window.AirportApp.WIND_SVG = WIND_SVG;
+  window.AirportApp.ICE_SVG = ICE_SVG;
+  window.AirportApp.isIcingRisk = isIcingRisk;
+  window.AirportApp.NOTAM_SVG = NOTAM_SVG;
+  window.AirportApp.notamCache = notamCache;
+  window.AirportApp.notamCacheTime = notamCacheTime;
+  window.AirportApp.fetchNotams = fetchNotams;
+  window.AirportApp.parseNotamResponse = parseNotamResponse;
+  window.AirportApp.isNotamStale = isNotamStale;
 
   if (window.AirportApp.map && window.AirportApp.layerControl) {
     loadAirports();

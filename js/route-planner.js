@@ -222,6 +222,26 @@
       .catch(function () {});
   }
 
+  function fetchRouteNotams() {
+    if (waypoints.length === 0) return;
+    var app = window.AirportApp;
+    if (!app.fetchNotams || !app.parseNotamResponse) return;
+
+    for (var i = 0; i < waypoints.length; i++) {
+      (function (icao) {
+        if (!icao || (app.notamCache[icao] && !app.isNotamStale(icao))) return;
+        app.fetchNotams(icao)
+          .then(function (json) {
+            var data = app.parseNotamResponse(json);
+            app.notamCache[icao] = data;
+            app.notamCacheTime[icao] = Date.now();
+            renderPanel();
+          })
+          .catch(function () {});
+      })(waypoints[i].code);
+    }
+  }
+
   function fetchRouteWeather() {
     if (waypoints.length === 0) return;
 
@@ -231,6 +251,9 @@
 
     // Fetch METAR for departure airport
     fetchDepMetar();
+
+    // Fetch NOTAMs for all waypoints
+    fetchRouteNotams();
 
     // Collect unique ICAO codes not yet cached or stale
     var toFetch = [];
@@ -287,6 +310,48 @@
       clearInterval(wxRefreshTimer);
       wxRefreshTimer = null;
     }
+  }
+
+  // --- AMA terrain check ---
+
+  function getAmaAt(lat, lon) {
+    var idx = window._amaIndex;
+    if (!idx) return 0;
+    var key = Math.floor(lat) + ',' + Math.floor(lon);
+    var val = idx[key];
+    return val || 0;
+  }
+
+  // Sample points along a leg and return the max AMA (in feet) encountered
+  function getLegMaxAMA(lat1, lon1, lat2, lon2) {
+    var maxAma = 0;
+    // Sample every ~10 nm or at least 10 steps
+    var distNm = haversineNm(lat1, lon1, lat2, lon2);
+    var steps = Math.max(10, Math.ceil(distNm / 10));
+    for (var s = 0; s <= steps; s++) {
+      var t = s / steps;
+      var lat = lat1 + (lat2 - lat1) * t;
+      var lon = lon1 + (lon2 - lon1) * t;
+      var ama = getAmaAt(lat, lon);
+      if (ama > maxAma) maxAma = ama;
+    }
+    return maxAma;
+  }
+
+  // Check all legs and return array of {legIndex, maxAma} where FL is at or below AMA
+  function checkRouteAMA() {
+    var fl = getFL();
+    var altFt = fl * 100;
+    var warnings = [];
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i].latlng;
+      var b = waypoints[i + 1].latlng;
+      var maxAma = getLegMaxAMA(a.lat, a.lng, b.lat, b.lng);
+      if (maxAma > 0 && altFt <= maxAma) {
+        warnings.push({ leg: i, maxAma: maxAma });
+      }
+    }
+    return warnings;
   }
 
   // --- Core logic ---
@@ -499,10 +564,12 @@
         var arrEpoch = depEpoch + cumTime[i] * 3600;
         var wxCat = null;
         var wxStrongWind = false;
+        var wxIcing = false;
         if (i === 0 && app.metarCache && app.metarCache[wp.code]) {
           var metar = app.metarCache[wp.code];
           wxCat = metar.fltCat;
           if (app.isStrongWind) wxStrongWind = app.isStrongWind(metar.wspd, metar.wgst);
+          if (app.isIcingRisk) wxIcing = app.isIcingRisk(metar);
         }
         if (!wxCat) {
           var wpWx = getWpWeather(wp.code, arrEpoch);
@@ -511,12 +578,25 @@
             wxStrongWind = wpWx.strongWind;
           }
         }
+        // Check icing from METAR cache for any waypoint (if not already set from departure)
+        if (!wxIcing && app.isIcingRisk && app.metarCache && app.metarCache[wp.code]) {
+          wxIcing = app.isIcingRisk(app.metarCache[wp.code]);
+        }
         if (wxCat) {
           var catCfg = METAR_CAT[wxCat] || { color: '#888' };
           var letter = METAR_LETTER[wxCat] || '?';
           html += ' <span class="route-wp-wx" style="background:' + catCfg.color + ';">' + letter + '</span>';
           if (wxStrongWind) {
             html += '<span class="wind-badge">' + (app.WIND_SVG || 'W') + '</span>';
+          }
+          if (wxIcing) {
+            html += '<span class="ice-badge">' + (app.ICE_SVG || 'ICE') + '</span>';
+          }
+          // NOTAM badge
+          if (app.notamCache && app.notamCache[wp.code] && app.notamCache[wp.code].count > 0) {
+            var nd = app.notamCache[wp.code];
+            var notamBadgeClass = nd.hasCritical ? 'notam-badge notam-badge-critical' : 'notam-badge';
+            html += '<span class="' + notamBadgeClass + '">' + (app.NOTAM_SVG || '!') + '</span>';
           }
         } else {
           html += ' <span class="route-wp-wx route-wp-wx-none">-</span>';
@@ -648,6 +728,21 @@
           if (remainHours < reserveHours) thtml += ' &mdash; below reserve!';
           thtml += '</div>';
         }
+      }
+
+      // AMA terrain warnings
+      var amaWarnings = checkRouteAMA();
+      if (amaWarnings.length > 0) {
+        var fl = getFL();
+        thtml += '<div class="route-terrain-warning">';
+        thtml += '&#9888; FL' + fl + ' is at or below terrain:';
+        for (var w = 0; w < amaWarnings.length; w++) {
+          var aw = amaWarnings[w];
+          var fromCode = waypoints[aw.leg].code || ('WP' + (aw.leg + 1));
+          var toCode = waypoints[aw.leg + 1].code || ('WP' + (aw.leg + 2));
+          thtml += '<br>' + escapeHtml(fromCode) + ' &rarr; ' + escapeHtml(toCode) + ': AMA ' + aw.maxAma + ' ft';
+        }
+        thtml += '</div>';
       }
 
       // GRAMET link (when 2+ waypoints)

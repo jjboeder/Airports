@@ -90,7 +90,7 @@
     });
 
   // OpenWeatherMap weather tile layers
-  var OWM_KEY = 'b7d9de6ecdcc4269c7aa4b4b1d3e8608';
+  var OWM_PROXY = 'https://owm-proxy.jjboeder.workers.dev';
   var OWM_LAYERS = [
     { id: 'wind_new', label: 'Wind' },
     { id: 'clouds_new', label: 'Clouds' },
@@ -103,11 +103,127 @@
     var layers = {};
     OWM_LAYERS.forEach(function (l) {
       layers[l.label] = L.tileLayer(
-        'https://tile.openweathermap.org/map/' + l.id + '/{z}/{x}/{y}.png?appid=' + OWM_KEY,
+        OWM_PROXY + '/tile/' + l.id + '/{z}/{x}/{y}.png',
         { opacity: 0.85, maxZoom: 18, attribution: '&copy; OpenWeatherMap' }
       );
     });
     return layers;
+  }
+
+  // AMA grid: transparent cells with visible borders
+  function amaBorderColor(ama) {
+    if (ama < 2000) return 'rgba(76, 175, 80, 0.5)';
+    if (ama < 5000) return 'rgba(180, 180, 0, 0.5)';
+    if (ama < 10000) return 'rgba(200, 120, 0, 0.5)';
+    return 'rgba(200, 50, 40, 0.5)';
+  }
+
+  // Format AMA label: e.g. 17400 → "174<sup>0</sup>", 2400 → "24<sup>0</sup>"
+  function amaLabelHtml(ama) {
+    var hundreds = String(Math.round(ama / 100));
+    var main = hundreds.slice(0, -1) || '0';
+    var last = hundreds.slice(-1);
+    return main + '<sup>' + last + '</sup>';
+  }
+
+  function loadAMAGrid(layerGroup, obsGroup) {
+    fetch('data/ama-grid.json')
+      .then(function (res) {
+        if (!res.ok) throw new Error('Failed to load ama-grid.json: ' + res.status);
+        return res.json();
+      })
+      .then(function (cells) {
+        // Build lookup for AMA values by cell
+        var amaIndex = {};
+        for (var i = 0; i < cells.length; i++) {
+          amaIndex[cells[i][0] + ',' + cells[i][1]] = cells[i][2];
+        }
+        window._amaIndex = amaIndex;
+
+        for (var i = 0; i < cells.length; i++) {
+          var lat = cells[i][0];
+          var lon = cells[i][1];
+          var ama = cells[i][2];
+
+          // Transparent rectangle with border only
+          var bounds = [[lat, lon], [lat + 1, lon + 1]];
+          var rect = L.rectangle(bounds, {
+            color: amaBorderColor(ama),
+            weight: 2,
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            interactive: true
+          });
+          rect._amaValue = ama;
+          rect.on('click', function (e) {
+            L.popup({ maxWidth: 200, className: 'ama-popup' })
+              .setLatLng(e.latlng)
+              .setContent('<div class="ama-popup-content"><strong>AMA:</strong> ' + e.target._amaValue + ' ft</div>')
+              .openOn(map);
+          });
+          rect.addTo(layerGroup);
+
+          // Italic label with superscript hundreds
+          L.marker([lat + 0.5, lon + 0.5], {
+            icon: L.divIcon({
+              className: 'ama-label',
+              html: amaLabelHtml(ama),
+              iconSize: [44, 20],
+              iconAnchor: [22, 10]
+            }),
+            interactive: false
+          }).addTo(layerGroup);
+        }
+
+        // Load obstacle markers
+        return fetch('data/ama-obstacles.json');
+      })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Failed to load ama-obstacles.json: ' + res.status);
+        return res.json();
+      })
+      .then(function (obstacles) {
+        // obstacles: [lat, lon, topFt, heightFt, name]
+        for (var i = 0; i < obstacles.length; i++) {
+          var o = obstacles[i];
+          var tip = o[4] + ' — ' + o[3] + ' ft AGL / ' + o[2] + ' ft AMSL';
+          var marker = L.marker([o[0], o[1]], {
+            icon: L.divIcon({
+              className: 'obs-marker',
+              html: '<svg viewBox="0 0 12 24" width="12" height="24"><line x1="6" y1="2" x2="6" y2="24" stroke="#222" stroke-width="2"/><line x1="2" y1="6" x2="10" y2="6" stroke="#222" stroke-width="1.5"/><line x1="3" y1="10" x2="9" y2="10" stroke="#222" stroke-width="1.5"/><line x1="4" y1="14" x2="8" y2="14" stroke="#222" stroke-width="1.5"/><circle cx="6" cy="2" r="2" fill="#222"/></svg>',
+              iconSize: [12, 24],
+              iconAnchor: [6, 24]
+            }),
+            interactive: true
+          });
+          marker.bindTooltip(tip, { direction: 'top', offset: [0, -24] });
+          marker.addTo(obsGroup);
+        }
+        console.log('AMA: loaded ' + obstacles.length + ' obstacle markers');
+      })
+      .catch(function (err) {
+        console.error('Error loading AMA grid:', err);
+      });
+
+    // Show/hide and scale labels based on zoom level
+    function amaFontSize(zoom) {
+      if (zoom <= 5) return 13;
+      return Math.round(13 + (zoom - 5) * 3);
+    }
+
+    map.on('zoomend', function () {
+      var zoom = map.getZoom();
+      var fs = amaFontSize(zoom) + 'px';
+      layerGroup.eachLayer(function (layer) {
+        if (layer instanceof L.Marker) {
+          var el = layer.getElement && layer.getElement();
+          if (el) {
+            el.style.display = zoom >= 5 ? '' : 'none';
+            el.style.fontSize = fs;
+          }
+        }
+      });
+    });
   }
 
   function setupLayerControl() {
@@ -124,6 +240,13 @@
       overlays[name] = weatherLayers[name];
       weatherLayerSet.push(weatherLayers[name]);
     });
+
+    // AMA grid overlay
+    var amaLayer = L.layerGroup();
+    var obsLayer = L.layerGroup();
+    overlays['AMA Grid'] = amaLayer;
+    overlays['Obstacles'] = obsLayer;
+    loadAMAGrid(amaLayer, obsLayer);
 
     // Airport layers will be added by airports.js via window.AirportApp
     window.AirportApp = window.AirportApp || {};
@@ -163,7 +286,7 @@
       return Math.round(ms * 1.944);
     }
 
-    function buildWeatherHtml(d) {
+    function buildWeatherHtml(d, extraRows) {
       var w = d.weather && d.weather[0];
       var icon = w ? 'https://openweathermap.org/img/wn/' + w.icon + '@2x.png' : '';
       var html = '<div class="wx-popup">';
@@ -192,31 +315,42 @@
       if (d.clouds) {
         html += '<div class="wx-row"><span class="wx-label">Clouds</span><span>' + d.clouds.all + '%</span></div>';
       }
+      if (extraRows) html += extraRows;
       html += '</div></div>';
       return html;
+    }
+
+    function amaHtml(lat, lon) {
+      var idx = window._amaIndex;
+      if (!idx) return '';
+      var key = Math.floor(lat) + ',' + Math.floor(lon);
+      var val = idx[key];
+      if (val == null) return '';
+      return '<div class="wx-row"><span class="wx-label">AMA</span><span style="font-style:italic;font-weight:600;">' + val + ' ft</span></div>';
     }
 
     map.on('click', function (e) {
 
       var lat = e.latlng.lat.toFixed(4);
       var lon = e.latlng.lng.toFixed(4);
+      var amaRow = amaHtml(e.latlng.lat, e.latlng.lng);
 
       weatherPopup
         .setLatLng(e.latlng)
-        .setContent('<div class="wx-popup"><span class="metar-loading">Loading weather...</span></div>')
+        .setContent('<div class="wx-popup"><span class="metar-loading">Loading weather...</span>' + amaRow + '</div>')
         .openOn(map);
 
-      fetch('https://api.openweathermap.org/data/2.5/weather?lat=' + lat + '&lon=' + lon + '&appid=' + OWM_KEY + '&units=metric')
+      fetch(OWM_PROXY + '/weather?lat=' + lat + '&lon=' + lon)
         .then(function (res) { return res.json(); })
         .then(function (data) {
           if (data.cod !== 200) {
-            weatherPopup.setContent('<div class="wx-popup">Weather data unavailable</div>');
+            weatherPopup.setContent('<div class="wx-popup">Weather data unavailable' + amaRow + '</div>');
             return;
           }
-          weatherPopup.setContent(buildWeatherHtml(data));
+          weatherPopup.setContent(buildWeatherHtml(data, amaRow));
         })
         .catch(function () {
-          weatherPopup.setContent('<div class="wx-popup">Failed to load weather</div>');
+          weatherPopup.setContent('<div class="wx-popup">Failed to load weather' + amaRow + '</div>');
         });
     });
   }
@@ -231,7 +365,7 @@
     'range-fuel', 'range-power', 'route-fl',
     'wb-empty-wt', 'wb-empty-cg', 'wb-deice',
     'wb-front-l', 'wb-front-r', 'wb-row1-l', 'wb-row1-r',
-    'wb-nose-rh', 'wb-nose-lh', 'wb-tail-a', 'wb-tail-bcd'
+    'wb-nose-rh', 'wb-nose-lh', 'wb-tail-a', 'wb-tail-b', 'wb-tail-c', 'wb-tail-d'
   ];
 
   function saveSettings() {
@@ -342,4 +476,145 @@
 
   // Restore after all modules have initialized (select options populated, etc.)
   setTimeout(restoreSettings, 500);
+
+  // --- Airport search ---
+  var searchInput = document.getElementById('search-input');
+  var searchResults = document.getElementById('search-results');
+  var searchTimer = null;
+
+  // Type priority for sorting (lower = better)
+  var TYPE_RANK = { large_airport: 0, medium_airport: 1, small_airport: 2 };
+
+  function doSearch(query) {
+    searchResults.innerHTML = '';
+    searchResults.classList.remove('visible');
+    if (!query || query.length < 2) return;
+
+    var app = window.AirportApp;
+    var data = app.airportData;
+    var COL = app.COL;
+    if (!data || !COL) return;
+
+    var q = query.toLowerCase();
+    var results = [];
+
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var icao = (row[COL.gps_code] || row[COL.ident] || '').toLowerCase();
+      var iata = (row[COL.iata] || '').toLowerCase();
+      var name = (row[COL.name] || '').toLowerCase();
+      var city = (row[COL.municipality] || '').toLowerCase();
+      var code = row[COL.gps_code] || row[COL.ident] || '';
+
+      // Skip if no marker exists for this airport
+      if (!app.markersByIcao || !app.markersByIcao[code]) continue;
+
+      var priority = 99;
+      if (icao.indexOf(q) === 0) priority = 0;          // ICAO prefix
+      else if (iata && iata.indexOf(q) === 0) priority = 1; // IATA prefix
+      else if (name.indexOf(q) >= 0) priority = 2;      // Name substring
+      else if (city.indexOf(q) >= 0) priority = 3;       // City substring
+      else continue;
+
+      var typeRank = TYPE_RANK[row[COL.type]] != null ? TYPE_RANK[row[COL.type]] : 9;
+      results.push({ row: row, code: code, priority: priority, typeRank: typeRank });
+    }
+
+    // Sort: match priority first, then type rank
+    results.sort(function (a, b) {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.typeRank - b.typeRank;
+    });
+
+    // Limit to 8
+    results = results.slice(0, 8);
+
+    if (results.length === 0) return;
+
+    for (var j = 0; j < results.length; j++) {
+      var r = results[j];
+      var row = r.row;
+      var iataStr = row[COL.iata] ? ' / ' + row[COL.iata] : '';
+      var div = document.createElement('div');
+      div.className = 'search-item';
+      div.setAttribute('data-code', r.code);
+      div.innerHTML = '<span class="search-item-code">' + r.code + '</span>'
+        + '<div class="search-item-info">'
+        + '<div class="search-item-name">' + (row[COL.name] || '') + '</div>'
+        + '<div class="search-item-city">' + (row[COL.municipality] || '') + iataStr + '</div>'
+        + '</div>';
+      searchResults.appendChild(div);
+    }
+    searchResults.classList.add('visible');
+  }
+
+  function selectResult(code) {
+    var app = window.AirportApp;
+    var marker = app.markersByIcao && app.markersByIcao[code];
+    if (!marker) return;
+    map.setView(marker.getLatLng(), 10);
+    marker.openPopup();
+    searchInput.value = '';
+    searchResults.innerHTML = '';
+    searchResults.classList.remove('visible');
+    searchInput.blur();
+  }
+
+  if (searchInput && searchResults) {
+    searchInput.addEventListener('input', function () {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        doSearch(searchInput.value.trim());
+      }, 150);
+    });
+
+    searchResults.addEventListener('click', function (e) {
+      var item = e.target.closest('.search-item');
+      if (item) selectResult(item.getAttribute('data-code'));
+    });
+
+    searchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        searchInput.value = '';
+        searchResults.innerHTML = '';
+        searchResults.classList.remove('visible');
+        searchInput.blur();
+      } else if (e.key === 'Enter') {
+        var active = searchResults.querySelector('.search-item.active');
+        var target = active || searchResults.querySelector('.search-item');
+        if (target) {
+          e.preventDefault();
+          selectResult(target.getAttribute('data-code'));
+        }
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        var items = searchResults.querySelectorAll('.search-item');
+        if (items.length === 0) return;
+        var active = searchResults.querySelector('.search-item.active');
+        var idx = -1;
+        for (var i = 0; i < items.length; i++) {
+          if (items[i] === active) { idx = i; break; }
+        }
+        if (active) active.classList.remove('active');
+        if (e.key === 'ArrowDown') idx = (idx + 1) % items.length;
+        else idx = idx <= 0 ? items.length - 1 : idx - 1;
+        items[idx].classList.add('active');
+        items[idx].scrollIntoView({ block: 'nearest' });
+      }
+    });
+
+    // Click outside closes results
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('#airport-search')) {
+        searchResults.classList.remove('visible');
+      }
+    });
+
+    // Re-show results when focusing back if there's text
+    searchInput.addEventListener('focus', function () {
+      if (searchInput.value.trim().length >= 2 && searchResults.children.length > 0) {
+        searchResults.classList.add('visible');
+      }
+    });
+  }
 })();

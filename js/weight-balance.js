@@ -12,13 +12,15 @@
     maxZFW: 2200,
     fuelDensity: 3.043, // kg per US gallon (JET-A1)
     stations: {
-      noseRH:   { arm: 0.051, maxKg: 18 },
-      noseLH:   { arm: 0.47,  maxKg: 18 },
+      noseRH:   { arm: 0.051, maxKg: 30 },
+      noseLH:   { arm: 0.47,  maxKg: 30 },
       deIce:    { arm: 0.899, maxKg: 27 },
       front:    { arm: 2.301, maxKg: 220 },
       row1:     { arm: 3.251, maxKg: 220 },
-      tailA:    { arm: 4.06,  maxKg: 45 },
-      tailBCD:  { arm: 4.18,  maxKg: 20 },
+      tailA:    { arm: 4.06,  maxKg: 6 },
+      tailB:    { arm: 4.178, maxKg: 6 },
+      tailC:    { arm: 4.178, maxKg: 68 },
+      tailD:    { arm: 4.424, maxKg: 40 },
       fuelMain: { arm: 2.629, maxKg: 159 },
       fuelAux:  { arm: 3.2,   maxKg: 116 }
     },
@@ -106,7 +108,9 @@
     var noseRH = val('wb-nose-rh');
     var noseLH = val('wb-nose-lh');
     var tailA = val('wb-tail-a');
-    var tailBCD = val('wb-tail-bcd');
+    var tailB = val('wb-tail-b');
+    var tailC = val('wb-tail-c');
+    var tailD = val('wb-tail-d');
 
     var fuelTotalKg = getFuelKg();
     var fuel = splitFuel(fuelTotalKg);
@@ -130,7 +134,9 @@
       { w: noseRH, arm: DA62_WB.stations.noseRH.arm },
       { w: noseLH, arm: DA62_WB.stations.noseLH.arm },
       { w: tailA, arm: DA62_WB.stations.tailA.arm },
-      { w: tailBCD, arm: DA62_WB.stations.tailBCD.arm },
+      { w: tailB, arm: DA62_WB.stations.tailB.arm },
+      { w: tailC, arm: DA62_WB.stations.tailC.arm },
+      { w: tailD, arm: DA62_WB.stations.tailD.arm },
       { w: fuel.main, arm: DA62_WB.stations.fuelMain.arm },
       { w: fuel.aux, arm: DA62_WB.stations.fuelAux.arm }
     ];
@@ -262,7 +268,7 @@
     var inputs = [
       'wb-empty-wt', 'wb-empty-cg', 'wb-deice',
       'wb-front-l', 'wb-front-r', 'wb-row1-l', 'wb-row1-r',
-      'wb-nose-rh', 'wb-nose-lh', 'wb-tail-a', 'wb-tail-bcd'
+      'wb-nose-rh', 'wb-nose-lh', 'wb-tail-a', 'wb-tail-b', 'wb-tail-c', 'wb-tail-d'
     ];
     for (var i = 0; i < inputs.length; i++) {
       var el = document.getElementById(inputs[i]);
