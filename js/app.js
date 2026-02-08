@@ -271,11 +271,14 @@
   }
 
   function windGridStep(zoom) {
-    if (zoom <= 4) return 5;
+    if (zoom <= 4) return 8;
+    if (zoom <= 5) return 5;
     if (zoom <= 6) return 3;
-    if (zoom <= 8) return 1.5;
-    if (zoom <= 10) return 0.75;
-    return 0.3;
+    if (zoom <= 7) return 2;
+    if (zoom <= 8) return 1;
+    if (zoom <= 9) return 0.5;
+    if (zoom <= 10) return 0.3;
+    return 0.15;
   }
 
   function setupWindBarbLayer(map, overlays) {

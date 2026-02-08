@@ -1,4 +1,4 @@
-var CACHE_NAME = 'airports-v1';
+var CACHE_NAME = 'airports-v3';
 var ASSETS = [
   './',
   './index.html',
@@ -46,6 +46,7 @@ self.addEventListener('fetch', function (e) {
   if (url.indexOf('metar.vatsim.net') >= 0 ||
       url.indexOf('aviationweather.gov') >= 0 ||
       url.indexOf('openweathermap.org') >= 0 ||
+      url.indexOf('owm-proxy.jjboeder.workers.dev') >= 0 ||
       url.indexOf('codetabs.com') >= 0 ||
       url.indexOf('corsproxy.io') >= 0) {
     e.respondWith(fetch(e.request));

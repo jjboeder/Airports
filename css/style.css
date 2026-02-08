@@ -1324,9 +1324,92 @@ html, body {
   align-items: center;
 }
 
+/* Route weather timeline */
+#route-wx-timeline {
+  margin-top: 6px;
+  overflow-x: auto;
+  border-top: 1px solid #eee;
+  padding-top: 4px;
+}
+
+.route-wx-table {
+  border-collapse: collapse;
+  width: auto;
+}
+
+.route-wx-table td {
+  padding: 1px 3px;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.route-wx-time {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 9px;
+  color: #888;
+  font-weight: 600;
+}
+
+.route-wx-code {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-weight: 700;
+  font-size: 9px;
+  color: #2980b9;
+}
+
+.route-wx-enroute {
+  color: #ccc;
+  font-size: 9px;
+}
+
+.route-wx-cond {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-weight: 700;
+  font-size: 10px;
+}
+
+.route-wx-vis {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-weight: 600;
+  font-size: 9px;
+  border-radius: 3px;
+  padding: 1px 3px;
+  color: #fff;
+  display: inline-block;
+}
+
+.route-wx-wind {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 9px;
+  color: #555;
+}
+
+.route-wx-arrow {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.route-wx-temp {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 9px;
+  color: #666;
+}
+
+.route-wx-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #999;
+  text-align: right !important;
+  padding-right: 4px !important;
+  width: 22px;
+}
+
 .wind-barb-label {
   font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: #333;
   text-shadow:

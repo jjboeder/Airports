@@ -37,7 +37,7 @@ export default {
           points.push({ lat: Math.round(lat * 1000) / 1000, lon: Math.round(lon * 1000) / 1000 });
         }
       }
-      if (points.length > 50) {
+      if (points.length > 100) {
         return new Response(JSON.stringify({ error: 'Too many grid points (' + points.length + '), increase step' }), {
           status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() }
         });

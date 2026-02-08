@@ -424,8 +424,8 @@
     html += '<div class="popup-taf-toggle" data-icao="' + escapeHtml(gpsCode || ident) + '">Show TAF</div>';
     html += '<div class="popup-taf" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;"></div>';
 
-    // --- NOTAMs (hidden by default, revealed on click) ---
-    html += '<div class="popup-notam-toggle" data-icao="' + escapeHtml(gpsCode || ident) + '">Show NOTAMs</div>';
+    // --- NOTAMs (toggle hidden until we know NOTAMs exist) ---
+    html += '<div class="popup-notam-toggle" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;">Show NOTAMs</div>';
     html += '<div class="popup-notam" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;"></div>';
 
     // --- Info grid ---
@@ -1203,13 +1203,14 @@
             });
           }
 
-          // Pre-fetch NOTAMs to show warning in title
+          // Pre-fetch NOTAMs to show warning in title and reveal toggle
           var nameEl = el.querySelector('.popup-name');
           if (icao && nameEl) {
             var cachedNotam = notamCache[icao];
             if (cachedNotam && !isNotamStale(icao)) {
               if (cachedNotam.count > 0) {
                 nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + cachedNotam.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
+                if (notamToggle) notamToggle.style.display = '';
               }
             } else {
               fetchNotams(icao)
@@ -1219,6 +1220,7 @@
                   notamCacheTime[icao] = Date.now();
                   if (data.count > 0 && nameEl) {
                     nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + data.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
+                    if (notamToggle) notamToggle.style.display = '';
                   }
                 })
                 .catch(function () { /* silently skip */ });

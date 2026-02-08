@@ -47,8 +47,11 @@
   var routeLayerGroup = null;
   var map = null;
   var routeWxCache = {}; // icao → taf json, local to route planner
+  var routeOwmCache = {}; // 'lat,lon' → {data, time}
+  var routeOwmSamples = []; // [{lat, lon, timeH, wpCode}]
   var wxRefreshTimer = null;
   var WX_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
+  var OWM_PROXY = 'https://owm-proxy.jjboeder.workers.dev';
 
   // --- DOM refs ---
   var toggleBtn, settingsDiv, waypointsDiv, totalsDiv, undoBtn, clearBtn;
@@ -255,6 +258,9 @@
     // Fetch NOTAMs for all waypoints
     fetchRouteNotams();
 
+    // Fetch OWM weather for timeline
+    fetchRouteOwmWeather();
+
     // Collect unique ICAO codes not yet cached or stale
     var toFetch = [];
     for (var i = 0; i < waypoints.length; i++) {
@@ -296,6 +302,239 @@
           });
       })(toFetch[i]);
     }
+  }
+
+  // Build exactly 6 sample points along the route: start, 4 evenly spaced, arrival
+  function buildRouteSamples() {
+    routeOwmSamples = [];
+    if (waypoints.length < 2 || legs.length === 0) return;
+
+    // Cumulative time at each waypoint (hours)
+    var cumTime = [0];
+    for (var i = 0; i < legs.length; i++) {
+      cumTime.push(cumTime[i] + legs[i].time);
+    }
+    var totalTime = cumTime[cumTime.length - 1];
+    if (totalTime <= 0) return;
+
+    var N = 6; // always 6 points
+    for (var s = 0; s < N; s++) {
+      var t = (s / (N - 1)) * totalTime;
+
+      // Find which leg this time falls on
+      var legIdx = 0;
+      for (var j = 0; j < legs.length; j++) {
+        if (t >= cumTime[j] && t <= cumTime[j + 1]) { legIdx = j; break; }
+      }
+
+      // Fraction along this leg
+      var legTime = cumTime[legIdx + 1] - cumTime[legIdx];
+      var frac = legTime > 0 ? (t - cumTime[legIdx]) / legTime : 0;
+
+      var a = waypoints[legIdx].latlng;
+      var b = waypoints[legIdx + 1].latlng;
+      var lat = a.lat + (b.lat - a.lat) * frac;
+      var lon = a.lng + (b.lng - a.lng) * frac;
+
+      // Check if this sample is near a waypoint
+      var wpCode = null;
+      for (var w = 0; w < waypoints.length; w++) {
+        if (Math.abs(t - cumTime[w]) < 0.02) { wpCode = waypoints[w].code; break; }
+      }
+
+      routeOwmSamples.push({
+        lat: Math.round(lat * 100) / 100,
+        lon: Math.round(lon * 100) / 100,
+        timeH: t,
+        wpCode: wpCode
+      });
+    }
+  }
+
+  function owmCacheKey(lat, lon) {
+    return lat.toFixed(2) + ',' + lon.toFixed(2);
+  }
+
+  function fetchRouteOwmWeather() {
+    if (waypoints.length < 2 || legs.length === 0) return;
+    buildRouteSamples();
+    if (routeOwmSamples.length === 0) return;
+
+    var now = Date.now();
+    var toFetch = [];
+    var seen = {};
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var s = routeOwmSamples[i];
+      var key = owmCacheKey(s.lat, s.lon);
+      if (seen[key]) continue;
+      var cached = routeOwmCache[key];
+      if (cached && (now - cached.time) < WX_REFRESH_INTERVAL) continue;
+      seen[key] = true;
+      toFetch.push({ key: key, lat: s.lat, lon: s.lon });
+    }
+    if (toFetch.length === 0) { renderRouteTimeline(); return; }
+
+    var pending = toFetch.length;
+    function done() {
+      pending--;
+      if (pending <= 0) renderRouteTimeline();
+    }
+    for (var i = 0; i < toFetch.length; i++) {
+      (function (item) {
+        fetch(OWM_PROXY + '/weather?lat=' + item.lat + '&lon=' + item.lon)
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data && data.cod === 200) {
+              routeOwmCache[item.key] = { data: data, time: Date.now() };
+            }
+            done();
+          })
+          .catch(function () { done(); });
+      })(toFetch[i]);
+    }
+  }
+
+  function owmWxLabel(main) {
+    var labels = {
+      'Clear': 'CLR', 'Clouds': 'CLD', 'Rain': 'RA', 'Drizzle': 'DZ',
+      'Thunderstorm': 'TS', 'Snow': 'SN', 'Mist': 'BR', 'Fog': 'FG',
+      'Haze': 'HZ', 'Smoke': 'FU', 'Dust': 'DU', 'Sand': 'SA',
+      'Squall': 'SQ', 'Tornado': 'FC'
+    };
+    return labels[main] || main;
+  }
+
+  function owmWxColor(main) {
+    var colors = {
+      'Clear': '#27ae60', 'Clouds': '#7f8c8d', 'Rain': '#2980b9', 'Drizzle': '#5dade2',
+      'Thunderstorm': '#8e44ad', 'Snow': '#5dade2', 'Mist': '#95a5a6', 'Fog': '#e67e22',
+      'Haze': '#bdc3c7', 'Smoke': '#95a5a6'
+    };
+    return colors[main] || '#888';
+  }
+
+  function visColor(visM) {
+    if (visM >= 8000) return '#27ae60';
+    if (visM >= 5000) return '#f1c40f';
+    if (visM >= 1500) return '#e67e22';
+    return '#e74c3c';
+  }
+
+  function renderRouteTimeline() {
+    var el = document.getElementById('route-wx-timeline');
+    if (!el) return;
+    if (routeOwmSamples.length < 2) { el.innerHTML = ''; return; }
+
+    // Check if we have any cached data
+    var hasData = false;
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var key = owmCacheKey(routeOwmSamples[i].lat, routeOwmSamples[i].lon);
+      if (routeOwmCache[key]) { hasData = true; break; }
+    }
+    if (!hasData) { el.innerHTML = ''; return; }
+
+    var depEpoch = getDepEpoch();
+
+    var html = '<table class="route-wx-table">';
+
+    // Row 1: Time labels
+    html += '<tr><td class="route-wx-label">UTC</td>';
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var s = routeOwmSamples[i];
+      var timeStr;
+      if (depEpoch) {
+        var epoch = depEpoch + s.timeH * 3600;
+        var d = new Date(epoch * 1000);
+        var hh = d.getUTCHours();
+        var mm = d.getUTCMinutes();
+        timeStr = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+      } else {
+        var h = Math.floor(s.timeH);
+        var m = Math.round((s.timeH - h) * 60);
+        timeStr = '+' + h + ':' + (m < 10 ? '0' : '') + m;
+      }
+      html += '<td class="route-wx-time">' + timeStr + '</td>';
+    }
+    html += '</tr>';
+
+    // Row 2: Waypoint code (if at a waypoint)
+    html += '<tr><td class="route-wx-label"></td>';
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var s = routeOwmSamples[i];
+      if (s.wpCode) {
+        html += '<td class="route-wx-code">' + escapeHtml(s.wpCode) + '</td>';
+      } else {
+        html += '<td class="route-wx-enroute">&middot;</td>';
+      }
+    }
+    html += '</tr>';
+
+    // Row 3: Weather condition
+    html += '<tr><td class="route-wx-label">WX</td>';
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var key = owmCacheKey(routeOwmSamples[i].lat, routeOwmSamples[i].lon);
+      var c = routeOwmCache[key];
+      if (c && c.data.weather && c.data.weather[0]) {
+        var main = c.data.weather[0].main;
+        var lbl = owmWxLabel(main);
+        var clr = owmWxColor(main);
+        html += '<td><span class="route-wx-cond" style="color:' + clr + '">' + lbl + '</span></td>';
+      } else {
+        html += '<td>-</td>';
+      }
+    }
+    html += '</tr>';
+
+    // Row 4: Visibility
+    html += '<tr><td class="route-wx-label">VIS</td>';
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var key = owmCacheKey(routeOwmSamples[i].lat, routeOwmSamples[i].lon);
+      var c = routeOwmCache[key];
+      if (c && c.data.visibility != null) {
+        var visM = c.data.visibility;
+        var visKm = visM >= 9999 ? '10+' : (visM / 1000).toFixed(0);
+        html += '<td><span class="route-wx-vis" style="background:' + visColor(visM) + '">' + visKm + '</span></td>';
+      } else {
+        html += '<td>-</td>';
+      }
+    }
+    html += '</tr>';
+
+    // Row 5: Wind
+    html += '<tr><td class="route-wx-label">WND</td>';
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var key = owmCacheKey(routeOwmSamples[i].lat, routeOwmSamples[i].lon);
+      var c = routeOwmCache[key];
+      if (c && c.data.wind) {
+        var spdKt = Math.round(c.data.wind.speed * 1.944);
+        var deg = c.data.wind.deg || 0;
+        var arrow = '<span class="route-wx-arrow" style="transform:rotate(' + (deg + 180) + 'deg)">&#8593;</span>';
+        var gustStr = '';
+        if (c.data.wind.gust) {
+          gustStr = 'G' + Math.round(c.data.wind.gust * 1.944);
+        }
+        html += '<td class="route-wx-wind">' + arrow + spdKt + gustStr + '</td>';
+      } else {
+        html += '<td>-</td>';
+      }
+    }
+    html += '</tr>';
+
+    // Row 6: Temperature
+    html += '<tr><td class="route-wx-label">TMP</td>';
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var key = owmCacheKey(routeOwmSamples[i].lat, routeOwmSamples[i].lon);
+      var c = routeOwmCache[key];
+      if (c && c.data.main && c.data.main.temp != null) {
+        html += '<td class="route-wx-temp">' + Math.round(c.data.main.temp) + '&deg;</td>';
+      } else {
+        html += '<td>-</td>';
+      }
+    }
+    html += '</tr>';
+
+    html += '</table>';
+    el.innerHTML = html;
   }
 
   function startWxRefresh() {
@@ -451,6 +690,8 @@
     legs = [];
     alternateIndex = -1;
     routeWxCache = {};
+    routeOwmCache = {};
+    routeOwmSamples = [];
     routeLayerGroup.clearLayers();
     renderPanel();
     updateButtons();
@@ -766,6 +1007,8 @@
     } else {
       totalsDiv.innerHTML = '';
     }
+
+    renderRouteTimeline();
   }
 
   function escapeHtml(str) {
@@ -910,6 +1153,8 @@
     legs = [];
     alternateIndex = -1;
     routeWxCache = {};
+    routeOwmCache = {};
+    routeOwmSamples = [];
     if (routeLayerGroup) routeLayerGroup.clearLayers();
 
     for (var i = 0; i < state.waypoints.length; i++) {
