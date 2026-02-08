@@ -227,7 +227,6 @@
 
     var app = window.AirportApp;
     var TAF_API = app.TAF_API;
-    var CORS_PROXY = app.CORS_PROXY;
     if (!TAF_API) return;
 
     // Fetch METAR for departure airport
@@ -259,11 +258,8 @@
     for (var i = 0; i < toFetch.length; i++) {
       (function (icao) {
         var url = TAF_API + '?ids=' + encodeURIComponent(icao) + '&format=json';
-        fetch(url)
-          .then(function (res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.json();
-          })
+        app.fetchWithProxyFallback(url)
+          .then(function (res) { return res.json(); })
           .then(function (json) {
             if (json && json.length > 0) {
               routeWxCache[icao] = json;
@@ -273,23 +269,7 @@
             done();
           })
           .catch(function () {
-            // Retry via CORS proxy
-            fetch(CORS_PROXY + encodeURIComponent(url))
-              .then(function (res) {
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                return res.json();
-              })
-              .then(function (json) {
-                if (json && json.length > 0) {
-                  routeWxCache[icao] = json;
-                  if (app.tafCache) app.tafCache[icao] = json;
-                  app.tafCacheTime[icao] = Date.now();
-                }
-                done();
-              })
-              .catch(function () {
-                done();
-              });
+            done();
           });
       })(toFetch[i]);
     }

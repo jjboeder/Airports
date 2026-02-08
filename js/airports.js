@@ -32,7 +32,10 @@
 
   var METAR_API = 'https://metar.vatsim.net/metar.php';
   var TAF_API = 'https://aviationweather.gov/api/data/taf';
-  var CORS_PROXY = 'https://corsproxy.io/?';
+  var CORS_PROXIES = [
+    function (url) { return 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(url); },
+    function (url) { return 'https://corsproxy.io/?' + encodeURIComponent(url); }
+  ];
 
   // Shared METAR cache: icao → parsed metar object
   var metarCache = {};
@@ -597,6 +600,30 @@
     return (tafJson && tafJson.length && tafJson[0].rawTAF) ? tafJson[0].rawTAF : null;
   }
 
+  // Fetch URL with CORS proxy fallback chain
+  function fetchWithProxyFallback(url) {
+    return fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res;
+      })
+      .catch(function () {
+        // Try each CORS proxy in order
+        var chain = Promise.reject();
+        for (var i = 0; i < CORS_PROXIES.length; i++) {
+          (function (proxyFn) {
+            chain = chain.catch(function () {
+              return fetch(proxyFn(url)).then(function (res) {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res;
+              });
+            });
+          })(CORS_PROXIES[i]);
+        }
+        return chain;
+      });
+  }
+
   function fetchTafForPopup(el, icao) {
     if (tafCache[icao] && !isStale(tafCacheTime, icao)) {
       var hours = computeHourlyCategories(tafCache[icao]);
@@ -607,11 +634,8 @@
 
     var url = TAF_API + '?ids=' + encodeURIComponent(icao) + '&format=json';
 
-    fetch(url)
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      })
+    fetchWithProxyFallback(url)
+      .then(function (res) { return res.json(); })
       .then(function (json) {
         if (!json || json.length === 0) throw new Error('empty');
         tafCache[icao] = json;
@@ -620,22 +644,7 @@
         renderTafInPopup(el, hours, getRawTaf(json));
       })
       .catch(function () {
-        // Retry via CORS proxy
-        fetch(CORS_PROXY + encodeURIComponent(url))
-          .then(function (res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.json();
-          })
-          .then(function (json) {
-            if (!json || json.length === 0) throw new Error('empty');
-            tafCache[icao] = json;
-            tafCacheTime[icao] = Date.now();
-            var hours = computeHourlyCategories(json);
-            renderTafInPopup(el, hours, getRawTaf(json));
-          })
-          .catch(function () {
-            el.innerHTML = '<span class="info-unknown">TAF unavailable</span>';
-          });
+        el.innerHTML = '<span class="info-unknown">TAF unavailable</span>';
       });
   }
 
@@ -977,7 +986,7 @@
   window.AirportApp = window.AirportApp || {};
   window.AirportApp.loadAirports = loadAirports;
   window.AirportApp.TAF_API = TAF_API;
-  window.AirportApp.CORS_PROXY = CORS_PROXY;
+  window.AirportApp.fetchWithProxyFallback = fetchWithProxyFallback;
   window.AirportApp.tafCache = tafCache;
   window.AirportApp.calcFlightCat = calcFlightCat;
   window.AirportApp.parseTafVisib = parseTafVisib;
