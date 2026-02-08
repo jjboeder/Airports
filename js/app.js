@@ -224,4 +224,59 @@
   // Expose map for other modules
   window.AirportApp = window.AirportApp || {};
   window.AirportApp.map = map;
+
+  // --- Settings persistence (localStorage) ---
+  var STORAGE_KEY = 'airports-panel-settings';
+  var PERSIST_IDS = [
+    'range-fuel', 'range-power', 'route-fl',
+    'wb-empty-wt', 'wb-empty-cg', 'wb-deice',
+    'wb-front-l', 'wb-front-r', 'wb-row1-l', 'wb-row1-r',
+    'wb-nose-rh', 'wb-nose-lh', 'wb-tail-a', 'wb-tail-bcd'
+  ];
+
+  function saveSettings() {
+    var data = {};
+    for (var i = 0; i < PERSIST_IDS.length; i++) {
+      var el = document.getElementById(PERSIST_IDS[i]);
+      if (!el) continue;
+      data[PERSIST_IDS[i]] = el.tagName === 'SELECT' ? el.selectedIndex : el.value;
+    }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+  }
+
+  function restoreSettings() {
+    var data;
+    try { data = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) {}
+    if (!data) return;
+    var changed = [];
+    for (var i = 0; i < PERSIST_IDS.length; i++) {
+      var id = PERSIST_IDS[i];
+      if (data[id] == null) continue;
+      var el = document.getElementById(id);
+      if (!el) continue;
+      if (el.tagName === 'SELECT') {
+        if (data[id] < el.options.length) el.selectedIndex = data[id];
+      } else {
+        el.value = data[id];
+      }
+      changed.push(el);
+    }
+    // Dispatch events so recalculations fire
+    for (var i = 0; i < changed.length; i++) {
+      changed[i].dispatchEvent(new Event('input', { bubbles: true }));
+      if (changed[i].tagName === 'SELECT') {
+        changed[i].dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+  }
+
+  // Auto-save on any input/change in the panel
+  var panel = document.getElementById('da62-panel');
+  if (panel) {
+    panel.addEventListener('input', saveSettings);
+    panel.addEventListener('change', saveSettings);
+  }
+
+  // Restore after all modules have initialized (select options populated, etc.)
+  setTimeout(restoreSettings, 500);
 })();
