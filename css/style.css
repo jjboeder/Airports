@@ -471,6 +471,25 @@ html, body {
   border-bottom-color: #2980b9;
 }
 
+.panel-tab-spacer {
+  flex: 1;
+}
+
+.panel-io-btn {
+  border: none;
+  background: none;
+  font-size: 13px;
+  color: #aaa;
+  cursor: pointer;
+  padding: 4px 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.panel-io-btn:hover {
+  color: #2980b9;
+}
+
 /* Tab content visibility */
 .tab-content {
   display: none;

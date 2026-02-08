@@ -790,6 +790,60 @@
     }
   }
 
+  // --- Route state export/import ---
+
+  function getRouteState() {
+    if (waypoints.length === 0) return null;
+    return {
+      waypoints: waypoints.map(function (wp) {
+        return {
+          code: wp.code,
+          name: wp.name,
+          lat: wp.latlng.lat,
+          lng: wp.latlng.lng,
+          data: wp.data
+        };
+      }),
+      alternateIndex: alternateIndex
+    };
+  }
+
+  function loadRoute(state) {
+    if (!state || !state.waypoints || state.waypoints.length === 0) return;
+    // Clear existing route
+    waypoints = [];
+    legs = [];
+    alternateIndex = -1;
+    routeWxCache = {};
+    if (routeLayerGroup) routeLayerGroup.clearLayers();
+
+    for (var i = 0; i < state.waypoints.length; i++) {
+      var wp = state.waypoints[i];
+      waypoints.push({
+        latlng: L.latLng(wp.lat, wp.lng),
+        data: wp.data,
+        code: wp.code,
+        name: wp.name
+      });
+    }
+    if (state.alternateIndex >= 0 && state.alternateIndex < waypoints.length) {
+      alternateIndex = state.alternateIndex;
+    }
+
+    // Activate route mode
+    if (!routeActive) startRoute();
+    recalculate();
+    renderRouteOnMap();
+    renderPanel();
+    updateButtons();
+    fetchRouteWeather();
+    startWxRefresh();
+  }
+
+  window.AirportApp = window.AirportApp || {};
+  window.AirportApp.getRouteState = getRouteState;
+  window.AirportApp.loadRoute = loadRoute;
+
   // --- Init ---
 
   function init() {

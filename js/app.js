@@ -235,12 +235,7 @@
   ];
 
   function saveSettings() {
-    var data = {};
-    for (var i = 0; i < PERSIST_IDS.length; i++) {
-      var el = document.getElementById(PERSIST_IDS[i]);
-      if (!el) continue;
-      data[PERSIST_IDS[i]] = el.tagName === 'SELECT' ? el.selectedIndex : el.value;
-    }
+    var data = gatherAll();
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
   }
 
@@ -248,6 +243,42 @@
     var data;
     try { data = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) {}
     if (!data) return;
+    applyAll(data);
+  }
+
+  // Auto-save on any input/change in the panel
+  var panel = document.getElementById('da62-panel');
+  if (panel) {
+    panel.addEventListener('input', saveSettings);
+    panel.addEventListener('change', saveSettings);
+  }
+
+  // Timestamp for filenames: YYYYMMDDHHMMZ
+  function fileTimestamp() {
+    var d = new Date();
+    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return '' + d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate())
+      + pad(d.getUTCHours()) + pad(d.getUTCMinutes());
+  }
+
+  // Gather all settings + route into one object
+  function gatherAll() {
+    var data = {};
+    for (var i = 0; i < PERSIST_IDS.length; i++) {
+      var el = document.getElementById(PERSIST_IDS[i]);
+      if (!el) continue;
+      data[PERSIST_IDS[i]] = el.tagName === 'SELECT' ? el.selectedIndex : el.value;
+    }
+    var app = window.AirportApp;
+    if (app.getRouteState) {
+      var route = app.getRouteState();
+      if (route) data.route = route;
+    }
+    return data;
+  }
+
+  // Apply settings + route from an object
+  function applyAll(data) {
     var changed = [];
     for (var i = 0; i < PERSIST_IDS.length; i++) {
       var id = PERSIST_IDS[i];
@@ -261,21 +292,53 @@
       }
       changed.push(el);
     }
-    // Dispatch events so recalculations fire
     for (var i = 0; i < changed.length; i++) {
       changed[i].dispatchEvent(new Event('input', { bubbles: true }));
       if (changed[i].tagName === 'SELECT') {
         changed[i].dispatchEvent(new Event('change', { bubbles: true }));
       }
     }
+    // Restore route
+    var app = window.AirportApp;
+    if (data.route && app.loadRoute) {
+      app.loadRoute(data.route);
+    }
   }
 
-  // Auto-save on any input/change in the panel
-  var panel = document.getElementById('da62-panel');
-  if (panel) {
-    panel.addEventListener('input', saveSettings);
-    panel.addEventListener('change', saveSettings);
+  // Save settings to file
+  function exportSettings() {
+    var data = gatherAll();
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'plan-' + fileTimestamp() + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
+
+  // Load settings from file
+  function importSettings(file) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var data;
+      try { data = JSON.parse(e.target.result); } catch (err) { return; }
+      applyAll(data);
+    };
+    reader.readAsText(file);
+  }
+
+  // Wire up save/load buttons
+  var saveBtn = document.getElementById('settings-save');
+  var loadBtn = document.getElementById('settings-load');
+  var fileInput = document.getElementById('settings-file');
+  if (saveBtn) saveBtn.addEventListener('click', exportSettings);
+  if (loadBtn) loadBtn.addEventListener('click', function () { fileInput.click(); });
+  if (fileInput) fileInput.addEventListener('change', function () {
+    if (fileInput.files.length > 0) {
+      importSettings(fileInput.files[0]);
+      fileInput.value = '';
+    }
+  });
 
   // Restore after all modules have initialized (select options populated, etc.)
   setTimeout(restoreSettings, 500);
