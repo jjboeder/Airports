@@ -1,4 +1,4 @@
-var CACHE_NAME = 'airports-v3';
+var CACHE_NAME = 'airports-v4';
 var ASSETS = [
   './',
   './index.html',
@@ -42,13 +42,8 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   var url = e.request.url;
 
-  // API calls (METAR, TAF, weather): always go to network, don't cache
-  if (url.indexOf('metar.vatsim.net') >= 0 ||
-      url.indexOf('aviationweather.gov') >= 0 ||
-      url.indexOf('openweathermap.org') >= 0 ||
-      url.indexOf('owm-proxy.jjboeder.workers.dev') >= 0 ||
-      url.indexOf('codetabs.com') >= 0 ||
-      url.indexOf('corsproxy.io') >= 0) {
+  // API calls (all go through worker proxy): always go to network, don't cache
+  if (url.indexOf('owm-proxy.jjboeder.workers.dev') >= 0) {
     e.respondWith(fetch(e.request));
     return;
   }

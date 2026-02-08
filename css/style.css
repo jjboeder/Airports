@@ -469,16 +469,106 @@ html, body {
   border: 1px solid #28a745;
 }
 
-.ac-link {
-  background: #fff3cd;
-  color: #856404;
-  border: 1px solid #ffc107;
-}
+
 
 .windy-link {
   background: #e8f4fd;
   color: #1a73a7;
   border: 1px solid #4fc3f7;
+}
+
+.aip-link {
+  background: #f3e5f5;
+  color: #6a1b9a;
+  border: 1px solid #ab47bc;
+}
+
+/* Charts toggle link */
+.popup-charts-toggle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a1b9a;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.popup-charts-toggle:hover {
+  text-decoration: underline;
+}
+
+.popup-charts {
+  margin: 4px 0 8px;
+}
+
+.charts-container {
+  font-size: 11px;
+}
+
+.charts-section {
+  border-top: 1px solid #eee;
+}
+
+.charts-section-hdr {
+  padding: 4px 0;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 11px;
+  color: #444;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.charts-section-hdr:hover {
+  color: #6a1b9a;
+}
+
+.charts-count {
+  font-weight: 400;
+  color: #888;
+}
+
+.charts-chevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: #999;
+}
+
+.charts-section-list {
+  padding: 0 0 4px 12px;
+}
+
+.charts-doc {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 4px;
+  margin: 1px 0;
+  text-decoration: none;
+  color: #2c3e50;
+  border-radius: 3px;
+  font-size: 11px;
+  transition: background 0.1s;
+}
+
+.charts-doc:hover {
+  background: #f3e5f5;
+}
+
+.charts-doc-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.charts-doc-size {
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-size: 10px;
+  color: #999;
 }
 
 .popup-content .popup-runways {
@@ -1405,6 +1495,51 @@ html, body {
   text-align: right !important;
   padding-right: 4px !important;
   width: 22px;
+}
+
+/* Auto Route (IFR) button */
+.route-btn-auto {
+  display: inline-block;
+  width: auto;
+  padding: 3px 8px;
+  font-size: 10px;
+  background: #8e44ad;
+  color: #fff;
+  border-color: #7d3c98;
+}
+
+.route-btn-auto:hover:not(:disabled) {
+  background: #7d3c98;
+}
+
+.route-btn-auto:disabled {
+  opacity: 0.5;
+}
+
+/* GRAMET cross section */
+.route-gramet-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #eee;
+}
+
+.route-gramet-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 3px;
+}
+
+.route-gramet-img {
+  width: 100%;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.route-gramet-img:hover {
+  border-color: #2980b9;
 }
 
 .wind-barb-label {

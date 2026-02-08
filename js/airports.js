@@ -30,17 +30,17 @@
     'LIFR': { color: '#9b59b6', label: 'LIFR' }
   };
 
-  var METAR_API = 'https://metar.vatsim.net/metar.php';
-  var TAF_API = 'https://aviationweather.gov/api/data/taf';
-  var CORS_PROXIES = [
-    function (url) { return 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(url); },
-    function (url) { return 'https://corsproxy.io/?' + encodeURIComponent(url); }
-  ];
+  var OWM_PROXY = 'https://owm-proxy.jjboeder.workers.dev';
+  var METAR_API = OWM_PROXY + '/metar';
+  var TAF_API = OWM_PROXY + '/taf';
+  var AR_METARTAF_API = OWM_PROXY + '/ar/metartaf/';
 
   // Shared METAR cache: icao → parsed metar object
   var metarCache = {};
   // TAF cache: icao → taf json
   var tafCache = {};
+  // Raw TAF text cache from autorouter combo endpoint
+  var rawTafCache = {};
   // Cache timestamps: icao → epoch ms
   var metarCacheTime = {};
   var tafCacheTime = {};
@@ -65,42 +65,26 @@
   // Inline SVG NOTAM exclamation triangle icon (amber warning)
   var NOTAM_SVG = '<svg class="notam-svg" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l7 14H1L8 1zm0 4v5h0V5zm0 7a1 1 0 100-2 1 1 0 000 2z"/></svg>';
 
-  // NOTAM API (FAA NOTAM Search — requires CORS proxy for POST)
-  var NOTAM_API = 'https://notams.aim.faa.gov/notamSearch/search';
+  // NOTAM API via worker proxy
 
   // NOTAM cache: icao → parsed notam data
   var notamCache = {};
   var notamCacheTime = {};
   var NOTAM_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
+  var chartsCache = {}; // icao → airport docs JSON
 
   function isNotamStale(icao) {
     var t = notamCacheTime[icao];
     return !t || (Date.now() - t > NOTAM_CACHE_MAX_AGE);
   }
 
-  // --- Fetch NOTAMs via POST through CORS proxy ---
+  // --- Fetch NOTAMs via worker proxy ---
   function fetchNotams(icao) {
-    var body = 'searchType=0&designatorsForLocation=' + encodeURIComponent(icao);
-    var proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(NOTAM_API);
-
-    return fetch(proxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
-    })
-    .then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
-    })
-    .catch(function () {
-      // Fallback: try GET with query params
-      var getUrl = NOTAM_API + '?searchType=0&designatorsForLocation=' + encodeURIComponent(icao);
-      var getProxy = 'https://corsproxy.io/?' + encodeURIComponent(getUrl);
-      return fetch(getProxy).then(function (res) {
+    return fetch(OWM_PROXY + '/notams?icao=' + encodeURIComponent(icao))
+      .then(function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json();
       });
-    });
   }
 
   // --- Parse and classify NOTAMs ---
@@ -465,12 +449,16 @@
     var icaoRaw = gpsCode || ident;
     var icaoEnc = encodeURIComponent(icaoRaw);
     html += '<div class="popup-links">';
+    html += '<a class="popup-link aip-link" data-icao="' + escapeHtml(icaoRaw) + '" style="display:none" target="_blank" rel="noopener">AIP</a>';
     html += '<a href="https://www.google.com/search?q=' + icaoEnc + '+airport" target="_blank" rel="noopener" class="popup-link google-link">Google</a>';
     html += '<a href="https://skyvector.com/airport/' + icaoEnc + '" target="_blank" rel="noopener" class="popup-link sv-link">SkyVector</a>';
     html += '<a href="https://ourairports.com/airports/' + icaoEnc + '/" target="_blank" rel="noopener" class="popup-link oa-link">OurAirports</a>';
-    html += '<a href="https://acukwik.com/Airport-Info/' + icaoEnc + '" target="_blank" rel="noopener" class="popup-link ac-link">AC-U-KWIK</a>';
     html += '<a href="https://www.windy.com/' + lat + '/' + lon + '?detail=true" target="_blank" rel="noopener" class="popup-link windy-link">Windy</a>';
     html += '</div>';
+
+    // --- Charts toggle ---
+    html += '<div class="popup-charts-toggle" data-icao="' + escapeHtml(icaoRaw) + '">Show Charts</div>';
+    html += '<div class="popup-charts" data-icao="' + escapeHtml(icaoRaw) + '" style="display:none;"></div>';
 
     // --- Runways ---
     if (runways.length > 0) {
@@ -490,6 +478,101 @@
 
     html += '</div>';
     return html;
+  }
+
+  // --- Render airport charts into popup ---
+  var CHART_SECTIONS = ['Airport', 'Departure', 'Arrival', 'Approach', 'VFR'];
+  var CHART_ICONS = { Airport: '\u2708', Departure: '\u2197', Arrival: '\u2198', Approach: '\u2B07', VFR: '\u2600' };
+
+  function formatFileSize(bytes) {
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+    return Math.round(bytes / 1024) + ' KB';
+  }
+
+  function shortenHeading(heading, icao) {
+    // Strip common prefixes like "AD 2 EFHK "
+    var short = heading.replace(/^AD 2 [A-Z]{4}\s*/i, '').replace(/ - ICAO$/i, '');
+    return short || 'Aerodrome Info (AIP)';
+  }
+
+  function findAipDoc(icao, data) {
+    var docs = data && data['Airport'] || [];
+    var pat = new RegExp('^AD 2 ' + icao + '$', 'i');
+    for (var i = 0; i < docs.length; i++) {
+      if (pat.test(docs[i].heading)) return docs[i];
+    }
+    return null;
+  }
+
+  function showAipLink(linkEl, icao, data) {
+    var doc = findAipDoc(icao, data);
+    if (doc) {
+      linkEl.href = OWM_PROXY + '/ar/airport-doc/' + (doc.docid || doc.id);
+      linkEl.style.display = '';
+    }
+  }
+
+  function renderChartsInPopup(el, icao, data) {
+    if (!data) { el.innerHTML = '<span class="info-unknown">No charts available</span>'; return; }
+
+    var aipDoc = findAipDoc(icao, data);
+
+    var html = '<div class="charts-container">';
+
+
+    for (var s = 0; s < CHART_SECTIONS.length; s++) {
+      var section = CHART_SECTIONS[s];
+      var docs = data[section];
+      if (!docs || docs.length === 0) continue;
+
+      // Filter out the AIP doc from the Airport section
+      var filteredDocs = docs;
+      if (section === 'Airport' && aipDoc) {
+        filteredDocs = [];
+        for (var f = 0; f < docs.length; f++) {
+          if (docs[f] !== aipDoc) filteredDocs.push(docs[f]);
+        }
+        if (filteredDocs.length === 0) continue;
+      }
+
+      var icon = CHART_ICONS[section] || '';
+      html += '<div class="charts-section">';
+      html += '<div class="charts-section-hdr" data-section="' + section + '">'
+        + icon + ' ' + escapeHtml(section) + ' <span class="charts-count">(' + filteredDocs.length + ')</span>'
+        + '<span class="charts-chevron">\u25B8</span></div>';
+      html += '<div class="charts-section-list" style="display:none;">';
+
+      for (var d = 0; d < filteredDocs.length; d++) {
+        var doc = filteredDocs[d];
+        var title = shortenHeading(doc.heading || doc.filename || '', icao);
+        var size = formatFileSize(doc.filesize || 0);
+        html += '<a href="' + OWM_PROXY + '/ar/airport-doc/' + (doc.docid || doc.id)
+          + '" target="_blank" rel="noopener" class="charts-doc">'
+          + '<span class="charts-doc-name">' + escapeHtml(title) + '</span>'
+          + '<span class="charts-doc-size">' + size + '</span></a>';
+      }
+
+      html += '</div></div>';
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
+
+    // Wire up section toggles
+    var hdrs = el.querySelectorAll('.charts-section-hdr');
+    for (var i = 0; i < hdrs.length; i++) {
+      hdrs[i].addEventListener('click', function () {
+        var list = this.nextElementSibling;
+        var chevron = this.querySelector('.charts-chevron');
+        if (list.style.display === 'none') {
+          list.style.display = '';
+          chevron.textContent = '\u25BE';
+        } else {
+          list.style.display = 'none';
+          chevron.textContent = '\u25B8';
+        }
+      });
+    }
   }
 
   // --- Render a METAR into the popup placeholder ---
@@ -543,7 +626,7 @@
       return;
     }
     el.innerHTML = '<span class="metar-loading">Loading METAR...</span>';
-    fetch(METAR_API + '?id=' + encodeURIComponent(icao))
+    fetch(METAR_API + '?ids=' + encodeURIComponent(icao))
       .then(function (res) { return res.text(); })
       .then(function (text) {
         var raw = text.trim();
@@ -562,6 +645,44 @@
       })
       .catch(function () {
         el.innerHTML = '<span class="info-unknown">Failed to load METAR</span>';
+      });
+  }
+
+  // --- Combo METAR+TAF from autorouter ---
+  function fetchMetarTafCombo(metarEl, tafToggle, tafDiv, icao) {
+    // If we have a fresh cached METAR, render it immediately
+    if (metarCache[icao] && !isStale(metarCacheTime, icao)) {
+      renderMetarInPopup(metarEl, metarCache[icao]);
+      return;
+    }
+    metarEl.innerHTML = '<span class="metar-loading">Loading METAR...</span>';
+    fetch(AR_METARTAF_API + encodeURIComponent(icao))
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (json) {
+        // Parse and cache METAR
+        if (json.metar) {
+          var metar = parseMetar(json.metar);
+          if (metar) {
+            metarCache[icao] = metar;
+            metarCacheTime[icao] = Date.now();
+            renderMetarInPopup(metarEl, metar);
+          } else {
+            metarEl.innerHTML = '<span class="info-unknown">No METAR available</span>';
+          }
+        } else {
+          metarEl.innerHTML = '<span class="info-unknown">No METAR available</span>';
+        }
+        // Cache raw TAF for immediate display when toggled
+        if (json.taf) {
+          rawTafCache[icao] = json.taf;
+        }
+      })
+      .catch(function () {
+        // Fall back to VATSIM METAR endpoint
+        fetchMetarForPopup(metarEl, icao);
       });
   }
 
@@ -772,30 +893,6 @@
     return (tafJson && tafJson.length && tafJson[0].rawTAF) ? tafJson[0].rawTAF : null;
   }
 
-  // Fetch URL with CORS proxy fallback chain
-  function fetchWithProxyFallback(url) {
-    return fetch(url)
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res;
-      })
-      .catch(function () {
-        // Try each CORS proxy in order
-        var chain = Promise.reject();
-        for (var i = 0; i < CORS_PROXIES.length; i++) {
-          (function (proxyFn) {
-            chain = chain.catch(function () {
-              return fetch(proxyFn(url)).then(function (res) {
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                return res;
-              });
-            });
-          })(CORS_PROXIES[i]);
-        }
-        return chain;
-      });
-  }
-
   function fetchTafForPopup(el, icao) {
     if (tafCache[icao] && !isStale(tafCacheTime, icao)) {
       var hours = computeHourlyCategories(tafCache[icao]);
@@ -804,10 +901,13 @@
     }
     el.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
 
-    var url = TAF_API + '?ids=' + encodeURIComponent(icao) + '&format=json';
+    var url = TAF_API + '?ids=' + encodeURIComponent(icao);
 
-    fetchWithProxyFallback(url)
-      .then(function (res) { return res.json(); })
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
       .then(function (json) {
         if (!json || json.length === 0) throw new Error('empty');
         tafCache[icao] = json;
@@ -921,7 +1021,7 @@
 
       batches.forEach(function (batch) {
         var ids = batch.map(function (a) { return a.icao; }).join(',');
-        fetch(METAR_API + '?id=' + ids)
+        fetch(METAR_API + '?ids=' + ids)
           .then(function (res) { return res.text(); })
           .then(function (text) {
             var lines = text.trim().split('\n').filter(Boolean);
@@ -1173,17 +1273,44 @@
           var metarDiv = el.querySelector('.popup-metar');
           if (!metarDiv) return;
           var icao = metarDiv.getAttribute('data-icao');
-          if (icao) fetchMetarForPopup(metarDiv, icao);
 
           var tafToggle = el.querySelector('.popup-taf-toggle');
           var tafDiv = el.querySelector('.popup-taf');
+
+          // Use combo METAR+TAF endpoint (falls back to VATSIM on error)
+          if (icao) fetchMetarTafCombo(metarDiv, tafToggle, tafDiv, icao);
+
+          // Populate AIP link
+          var aipLink = el.querySelector('.aip-link');
+          if (aipLink && icao) {
+            var aipIcao = aipLink.getAttribute('data-icao');
+            if (chartsCache[aipIcao]) {
+              showAipLink(aipLink, aipIcao, chartsCache[aipIcao]);
+            } else {
+              fetch(OWM_PROXY + '/ar/airport-docs/' + encodeURIComponent(aipIcao))
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                  var d = Array.isArray(data) ? data[0] : data;
+                  chartsCache[aipIcao] = d;
+                  showAipLink(aipLink, aipIcao, d);
+                })
+                .catch(function () {});
+            }
+          }
+
           if (tafToggle && tafDiv) {
             tafToggle.addEventListener('click', function () {
               tafDiv.style.display = '';
               tafToggle.style.display = 'none';
               var tafIcao = tafDiv.getAttribute('data-icao');
               if (tafIcao) {
-                tafDiv.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
+                // Show raw TAF immediately if we got it from combo endpoint
+                if (rawTafCache[tafIcao]) {
+                  tafDiv.innerHTML = '<div class="taf-header">TAF</div><div class="taf-raw">' + escapeHtml(rawTafCache[tafIcao]) + '</div>';
+                } else {
+                  tafDiv.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
+                }
+                // Always fetch structured TAF for the hourly timeline visualization
                 fetchTafForPopup(tafDiv, tafIcao);
               }
             });
@@ -1227,6 +1354,34 @@
             }
           }
 
+          // Charts toggle
+          var chartsToggle = el.querySelector('.popup-charts-toggle');
+          var chartsDiv = el.querySelector('.popup-charts');
+          if (chartsToggle && chartsDiv) {
+            chartsToggle.addEventListener('click', function () {
+              chartsDiv.style.display = '';
+              chartsToggle.style.display = 'none';
+              var chartsIcao = chartsDiv.getAttribute('data-icao');
+              if (chartsIcao) {
+                if (chartsCache[chartsIcao]) {
+                  renderChartsInPopup(chartsDiv, chartsIcao, chartsCache[chartsIcao]);
+                } else {
+                  chartsDiv.innerHTML = '<span class="metar-loading">Loading charts...</span>';
+                  fetch(OWM_PROXY + '/ar/airport-docs/' + encodeURIComponent(chartsIcao))
+                    .then(function (res) { return res.json(); })
+                    .then(function (data) {
+                      var d = Array.isArray(data) ? data[0] : data;
+                      chartsCache[chartsIcao] = d;
+                      renderChartsInPopup(chartsDiv, chartsIcao, d);
+                    })
+                    .catch(function () {
+                      chartsDiv.innerHTML = '<span class="info-unknown">Charts not available</span>';
+                    });
+                }
+              }
+            });
+          }
+
           // Set range origin to the airport location (skip in route mode)
           var source = popup._source;
           if (source && source.getLatLng && window.AirportApp.setRangeOrigin && !window.AirportApp.routeMode) {
@@ -1248,8 +1403,8 @@
 
   window.AirportApp = window.AirportApp || {};
   window.AirportApp.loadAirports = loadAirports;
+  window.AirportApp.OWM_PROXY = OWM_PROXY;
   window.AirportApp.TAF_API = TAF_API;
-  window.AirportApp.fetchWithProxyFallback = fetchWithProxyFallback;
   window.AirportApp.tafCache = tafCache;
   window.AirportApp.calcFlightCat = calcFlightCat;
   window.AirportApp.parseTafVisib = parseTafVisib;
@@ -1272,6 +1427,7 @@
   window.AirportApp.fetchNotams = fetchNotams;
   window.AirportApp.parseNotamResponse = parseNotamResponse;
   window.AirportApp.isNotamStale = isNotamStale;
+  window.AirportApp.rawTafCache = rawTafCache;
 
   if (window.AirportApp.map && window.AirportApp.layerControl) {
     loadAirports();

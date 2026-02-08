@@ -53,6 +53,12 @@
   var WX_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
   var OWM_PROXY = 'https://owm-proxy.jjboeder.workers.dev';
 
+  // Autorouter state
+  var autoRouteId = null;      // current autorouter route ID
+  var autoRoutePolling = false; // whether we're polling
+  var arAircraftId = null;     // DA62 aircraft ID from autorouter
+  var lastFpl = null;          // intermediate fpl from autorouter (fallback)
+
   // --- DOM refs ---
   var toggleBtn, settingsDiv, waypointsDiv, totalsDiv, undoBtn, clearBtn;
 
@@ -210,7 +216,7 @@
     if (!icao || !app.METAR_API) return;
     if (app.metarCache && app.metarCache[icao] && !app.isStale(app.metarCacheTime, icao)) return;
 
-    fetch(app.METAR_API + '?id=' + encodeURIComponent(icao))
+    fetch(app.METAR_API + '?ids=' + encodeURIComponent(icao))
       .then(function (res) { return res.text(); })
       .then(function (text) {
         var raw = text.trim();
@@ -286,9 +292,12 @@
 
     for (var i = 0; i < toFetch.length; i++) {
       (function (icao) {
-        var url = TAF_API + '?ids=' + encodeURIComponent(icao) + '&format=json';
-        app.fetchWithProxyFallback(url)
-          .then(function (res) { return res.json(); })
+        var url = TAF_API + '?ids=' + encodeURIComponent(icao);
+        fetch(url)
+          .then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+          })
           .then(function (json) {
             if (json && json.length > 0) {
               routeWxCache[icao] = json;
@@ -374,24 +383,20 @@
     }
     if (toFetch.length === 0) { renderRouteTimeline(); return; }
 
-    var pending = toFetch.length;
-    function done() {
-      pending--;
-      if (pending <= 0) renderRouteTimeline();
-    }
-    for (var i = 0; i < toFetch.length; i++) {
-      (function (item) {
-        fetch(OWM_PROXY + '/weather?lat=' + item.lat + '&lon=' + item.lon)
-          .then(function (res) { return res.json(); })
-          .then(function (data) {
-            if (data && data.cod === 200) {
-              routeOwmCache[item.key] = { data: data, time: Date.now() };
-            }
-            done();
-          })
-          .catch(function () { done(); });
-      })(toFetch[i]);
-    }
+    var points = toFetch.map(function (item) { return item.lat + ',' + item.lon; }).join(',');
+    fetch(OWM_PROXY + '/route-wx?points=' + points)
+      .then(function (res) { return res.json(); })
+      .then(function (results) {
+        var now = Date.now();
+        for (var i = 0; i < results.length && i < toFetch.length; i++) {
+          var data = results[i];
+          if (data && data.cod === 200) {
+            routeOwmCache[toFetch[i].key] = { data: data, time: now };
+          }
+        }
+        renderRouteTimeline();
+      })
+      .catch(function () { renderRouteTimeline(); });
   }
 
   function owmWxLabel(main) {
@@ -692,6 +697,10 @@
     routeWxCache = {};
     routeOwmCache = {};
     routeOwmSamples = [];
+    autoRouteId = null;
+    autoRoutePolling = false;
+    lastFpl = null;
+
     routeLayerGroup.clearLayers();
     renderPanel();
     updateButtons();
@@ -986,24 +995,34 @@
         thtml += '</div>';
       }
 
-      // GRAMET link (when 2+ waypoints)
+      // GRAMET inline image (when 2+ waypoints)
       if (waypoints.length >= 2 && depEpoch) {
-        var icaoStr = waypoints.map(function (wp) { return wp.code; }).join('_');
         var totalFlightHours = cumTime[cumTime.length - 1] || 1;
-        var hfin = Math.ceil(totalFlightHours);
-        if (hfin < 1) hfin = 1;
+        var totalEetSec = Math.ceil(totalFlightHours * 3600);
         var fl = getFL();
-        var grametUrl = 'https://www.ogimet.com/display_gramet.php?lang=en'
-          + '&icao=' + encodeURIComponent(icaoStr)
-          + '&hini=0'
-          + '&tref=' + depEpoch
-          + '&hfin=' + hfin
-          + '&fl=' + fl
-          + '&enviar=Enviar';
-        thtml += '<div><a href="' + escapeHtml(grametUrl) + '" target="_blank" rel="noopener" class="route-gramet-link">GRAMET</a></div>';
+
+        // Inline GRAMET from autorouter
+        var grametWaypoints = waypoints.map(function (wp) { return wp.code; }).join(' ');
+        var grametSrc = OWM_PROXY + '/ar/gramet?waypoints=' + encodeURIComponent(grametWaypoints)
+          + '&departuretime=' + depEpoch
+          + '&totaleet=' + totalEetSec
+          + '&altitude=' + (fl * 100);
+        thtml += '<div class="route-gramet-section">';
+        thtml += '<div class="route-gramet-label">GRAMET Cross Section</div>';
+        thtml += '<img class="route-gramet-img" src="' + escapeHtml(grametSrc) + '" alt="GRAMET" onerror="this.style.display=\'none\'" data-gramet-url="' + escapeHtml(grametSrc) + '" style="cursor:pointer" title="Click to enlarge">';
+        thtml += '</div>';
       }
 
       totalsDiv.innerHTML = thtml;
+
+      // Wire up GRAMET image click → open in new window
+      var grametImg = totalsDiv.querySelector('.route-gramet-img');
+      if (grametImg) {
+        grametImg.addEventListener('click', function () {
+          var imgUrl = this.getAttribute('data-gramet-url');
+          if (imgUrl) window.open(imgUrl, '_blank');
+        });
+      }
     } else {
       totalsDiv.innerHTML = '';
     }
@@ -1053,6 +1072,251 @@
     toggleBtn.className = 'route-btn route-btn-start';
   }
 
+  // --- Autorouter IFR route finder ---
+
+  function fetchAircraftId() {
+    if (arAircraftId) return;
+    fetch(OWM_PROXY + '/ar/aircraft')
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        // Response: {rows: [{id, callsign, manufacturer, model, ...}], ...}
+        var rows = data.rows || data;
+        if (!Array.isArray(rows)) return;
+        for (var i = 0; i < rows.length; i++) {
+          var ac = rows[i];
+          var model = (ac.model || '').toUpperCase().replace(/\s+/g, '');
+          if (model.indexOf('DA62') >= 0) {
+            arAircraftId = ac.id;
+            console.log('Autorouter DA62 aircraft ID:', arAircraftId);
+            return;
+          }
+        }
+        // Fallback: use first (default) aircraft if only one exists
+        if (rows.length === 1) {
+          arAircraftId = rows[0].id;
+          console.log('Autorouter aircraft ID (default):', arAircraftId);
+        } else {
+          console.warn('DA62 not found in autorouter aircraft list');
+        }
+      })
+      .catch(function (e) {
+        console.error('Failed to fetch autorouter aircraft:', e);
+      });
+  }
+
+  function startAutoRoute() {
+    if (waypoints.length < 2) return;
+    var depEpoch = getDepEpoch();
+    if (!depEpoch) {
+      alert('Set departure time before auto-routing');
+      return;
+    }
+    if (!arAircraftId) {
+      alert('Autorouter aircraft not yet loaded. Try again.');
+      fetchAircraftId();
+      return;
+    }
+
+    var dep = waypoints[0].code;
+    var dest = waypoints[waypoints.length - 1].code;
+    var btn = document.getElementById('auto-route-btn');
+    if (btn) {
+      btn.textContent = 'Finding route...';
+      btn.disabled = true;
+    }
+
+    lastFpl = null; // reset for new route attempt
+
+
+    var body = {
+      departure: dep,
+      destination: dest,
+      departuretime: depEpoch,
+      aircraftid: arAircraftId,
+      optimize: 'fuel'
+    };
+
+    fetch(OWM_PROXY + '/ar/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (data.id || data._id) {
+        autoRouteId = data.id || data._id;
+        autoRoutePolling = true;
+        pollAutoRoute(autoRouteId, 0);
+      } else {
+        throw new Error(data.error || data.message || 'No route ID returned');
+      }
+    })
+    .catch(function (e) {
+      console.error('Auto-route start error:', e);
+      if (btn) { btn.textContent = 'Auto Route (IFR)'; btn.disabled = false; }
+      alert('Auto-route failed: ' + e.message);
+    });
+  }
+
+  function pollAutoRoute(routeId, attempt) {
+    if (!autoRoutePolling || routeId !== autoRouteId) return;
+    if (attempt >= 60) {
+      autoRoutePolling = false;
+      var btn = document.getElementById('auto-route-btn');
+      if (btn) { btn.textContent = 'Auto Route (IFR)'; btn.disabled = false; }
+      console.warn('Auto-route polling timed out');
+      return;
+    }
+
+    fetch(OWM_PROXY + '/ar/route/' + encodeURIComponent(routeId) + '/poll', {
+      method: 'PUT'
+    })
+    .then(function (res) { return res.json(); })
+    .then(function (commands) {
+      if (!autoRoutePolling || routeId !== autoRouteId) return;
+      if (!Array.isArray(commands)) commands = [commands];
+
+      var shouldPollImmediately = false;
+      var bestSolution = null;
+      var stopped = false;
+      for (var i = 0; i < commands.length; i++) {
+        var cmd = commands[i];
+        console.log('autoroute cmd:', cmd.cmdname, cmd);
+
+        // Solution found — keep the last (best) one
+        if (cmd.cmdname === 'solution') {
+          bestSolution = cmd;
+        }
+
+        // Intermediate fpl (not yet IFPS-validated) — use as fallback
+        if (cmd.cmdname === 'fpl') {
+          lastFpl = cmd;
+        }
+
+        // Server says poll again immediately (more messages pending)
+        if (cmd.cmdname === 'pollagain') {
+          shouldPollImmediately = true;
+        }
+
+        // Routing finished — check if successful
+        if (cmd.cmdname === 'autoroute' && cmd.status === 'stopping') {
+          stopped = true;
+          if (!cmd.routesuccess && !bestSolution) {
+            autoRoutePolling = false;
+            var btn = document.getElementById('auto-route-btn');
+            if (btn) { btn.textContent = 'Auto Route (IFR)'; btn.disabled = false; }
+            console.warn('Auto-route failed: no route found');
+            if (lastFpl) {
+              applyAutoRoute(lastFpl);
+              stopAutoRoute(routeId);
+            }
+            return;
+          }
+        }
+
+        // Routing terminated or quit
+        if (cmd.cmdname === 'autoroute' && (cmd.status === 'terminate' || cmd.status === 'quit')) {
+          autoRoutePolling = false;
+          var btn = document.getElementById('auto-route-btn');
+          if (btn) { btn.textContent = 'Auto Route (IFR)'; btn.disabled = false; }
+          return;
+        }
+      }
+
+      // Apply best solution found in this batch
+      if (bestSolution) {
+        autoRoutePolling = false;
+        applyAutoRoute(bestSolution);
+        stopAutoRoute(routeId);
+        return;
+      }
+
+      // Continue polling
+      var delay = shouldPollImmediately ? 0 : 500;
+      setTimeout(function () { pollAutoRoute(routeId, attempt + 1); }, delay);
+    })
+    .catch(function () {
+      if (!autoRoutePolling || routeId !== autoRouteId) return;
+      // Network error (e.g. CF timeout), retry
+      setTimeout(function () { pollAutoRoute(routeId, attempt + 1); }, 2000);
+    });
+  }
+
+  function applyAutoRoute(solution) {
+    var btn = document.getElementById('auto-route-btn');
+    if (btn) { btn.textContent = 'Auto Route (IFR)'; btn.disabled = false; }
+
+    if (!solution) return;
+
+    // Extract waypoints from autorouter fplan array
+    var solutionWps = solution.fplan || solution.waypoints || [];
+    if (solutionWps.length < 2) {
+      console.warn('Auto-route solution has fewer than 2 waypoints');
+      return;
+    }
+
+    // Clear current route
+    waypoints = [];
+    legs = [];
+    alternateIndex = -1;
+    routeWxCache = {};
+    routeOwmCache = {};
+    routeOwmSamples = [];
+    if (routeLayerGroup) routeLayerGroup.clearLayers();
+
+    var app = window.AirportApp;
+    var markersByIcao = app.markersByIcao || {};
+
+    for (var i = 0; i < solutionWps.length; i++) {
+      var swp = solutionWps[i];
+      var ident = swp.ident || swp.icao || swp.name || '';
+      var lat = swp.coordlatdeg != null ? swp.coordlatdeg : swp.lat;
+      var lon = swp.coordlondeg != null ? swp.coordlondeg : swp.lon;
+
+      if (lat == null || lon == null) continue;
+
+      var latlng = L.latLng(lat, lon);
+      var marker = markersByIcao[ident];
+      if (marker && marker._airportData) {
+        waypoints.push({
+          latlng: latlng,
+          data: marker._airportData,
+          code: getCode(marker._airportData),
+          name: getName(marker._airportData)
+        });
+      } else {
+        waypoints.push({
+          latlng: latlng,
+          data: null,
+          code: ident,
+          name: swp.name || ident
+        });
+      }
+    }
+
+    if (!routeActive) startRoute();
+    recalculate();
+    renderRouteOnMap();
+    renderPanel();
+    updateButtons();
+    fetchRouteWeather();
+    startWxRefresh();
+
+    // Fit map to route bounds
+    if (map && waypoints.length >= 2) {
+      var bounds = L.latLngBounds(waypoints.map(function (wp) { return wp.latlng; }));
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+  }
+
+  function stopAutoRoute(routeId) {
+    // Fire-and-forget stop + close
+    fetch(OWM_PROXY + '/ar/route/' + encodeURIComponent(routeId) + '/stop', { method: 'PUT' }).catch(function () {});
+    setTimeout(function () {
+      fetch(OWM_PROXY + '/ar/route/' + encodeURIComponent(routeId) + '/close', { method: 'PUT' }).catch(function () {});
+    }, 500);
+  }
+
   // --- Event wiring ---
 
   function setupRoutePlanner() {
@@ -1078,6 +1342,17 @@
     }
 
     setupTabs();
+
+    // Fetch autorouter aircraft ID (DA62)
+    fetchAircraftId();
+
+    // Auto Route (IFR) button
+    var autoRouteBtn = document.getElementById('auto-route-btn');
+    if (autoRouteBtn) {
+      autoRouteBtn.addEventListener('click', function () {
+        startAutoRoute();
+      });
+    }
 
     // Toggle route mode
     toggleBtn.addEventListener('click', function () {
