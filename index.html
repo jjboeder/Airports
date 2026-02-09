@@ -24,6 +24,19 @@
 <body>
   <div id="map"></div>
 
+  <!-- SWC floating panel -->
+  <div id="swc-panel" class="swc-panel" style="display:none;">
+    <div class="swc-panel-hdr">
+      <span class="swc-panel-title">SWC</span>
+      <span class="swc-panel-time"></span>
+      <a class="swc-panel-pdf" target="_blank" rel="noopener" style="display:none">PDF</a>
+      <button class="swc-panel-close">&times;</button>
+    </div>
+    <div class="swc-panel-body">
+      <span class="metar-loading">Loading SWC...</span>
+    </div>
+  </div>
+
   <div id="airport-search" class="panel">
     <input type="text" id="search-input" placeholder="Search ICAO, IATA, name..." autocomplete="off">
     <div id="search-results"></div>

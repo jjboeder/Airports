@@ -394,6 +394,22 @@
       position: 'topright'
     }).addTo(map);
 
+    // SWC button control
+    var SwcControl = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd: function () {
+        var btn = L.DomUtil.create('div', 'leaflet-bar swc-control');
+        btn.innerHTML = '<a href="#" title="Significant Weather Chart">SWC</a>';
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', function (e) {
+          L.DomEvent.preventDefault(e);
+          toggleSwcPanel();
+        });
+        return btn;
+      }
+    });
+    new SwcControl().addTo(map);
+
     // Weather detail popup on map click when a weather layer is active
     setupWeatherPopup(weatherLayerSet);
 
@@ -754,4 +770,64 @@
       }
     });
   }
+
+  // --- SWC panel ---
+
+  var swcLoaded = false;
+
+  function toggleSwcPanel() {
+    var panel = document.getElementById('swc-panel');
+    if (!panel) return;
+    if (panel.style.display === 'none') {
+      panel.style.display = '';
+      if (!swcLoaded) loadSwc();
+    } else {
+      panel.style.display = 'none';
+    }
+  }
+
+  function loadSwc() {
+    var body = document.querySelector('.swc-panel-body');
+    var timeEl = document.querySelector('.swc-panel-time');
+    var pdfEl = document.querySelector('.swc-panel-pdf');
+    if (!body) return;
+
+    body.innerHTML = '<span class="metar-loading">Loading SWC...</span>';
+
+    fetch('https://www.ilmailusaa.fi/weatheranim.php?region=scandinavia&id=swc&level=SWC&time=')
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data.images || data.images.length === 0) {
+          body.innerHTML = '<span class="info-unknown">No SWC available</span>';
+          return;
+        }
+        var img = data.images[0];
+        var imageUrl = 'https://www.ilmailusaa.fi/' + img.src.replace('../', '');
+
+        body.innerHTML = '<img class="swc-chart-img" src="' + imageUrl + '" alt="SWC">';
+
+        if (img.time && timeEl) {
+          timeEl.textContent = img.time;
+        }
+        if (data.pdf && pdfEl) {
+          pdfEl.href = 'https://www.ilmailusaa.fi/' + data.pdf.replace('./', '');
+          pdfEl.style.display = '';
+        }
+        swcLoaded = true;
+      })
+      .catch(function () {
+        body.innerHTML = '<span class="info-unknown">Failed to load SWC</span>';
+      });
+  }
+
+  // Close button
+  document.addEventListener('DOMContentLoaded', function () {
+    var closeBtn = document.querySelector('.swc-panel-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function () {
+        var panel = document.getElementById('swc-panel');
+        if (panel) panel.style.display = 'none';
+      });
+    }
+  });
 })();
