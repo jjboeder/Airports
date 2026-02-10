@@ -633,6 +633,17 @@
     }
   }
 
+  function addNamedWaypoint(latlng, code, name) {
+    if (!routeActive) return;
+    waypoints.push({ latlng: latlng, data: null, code: code, name: name || code });
+    recalculate();
+    renderRouteOnMap();
+    renderPanel();
+    updateButtons();
+    fetchRouteWeather();
+    startWxRefresh();
+  }
+
   function addMapWaypoint(latlng) {
     if (!routeActive) return;
     var lat = latlng.lat.toFixed(4);
@@ -3879,13 +3890,22 @@
       if (!routeActive) return;
       if (skipNextRouteAdd) { skipNextRouteAdd = false; return; }
       var source = e.popup._source;
-      if (!source || !source._airportData) return;
-      justAddedFromPopup = true;
-      window.AirportApp.justAddedAirport = true;
-      setTimeout(function () { justAddedFromPopup = false; window.AirportApp.justAddedAirport = false; }, 50);
-      addWaypoint(source.getLatLng(), source._airportData);
-      // Close popup immediately — in route mode we just add waypoints, no popups
-      map.closePopup(e.popup);
+      if (!source) return;
+
+      if (source._airportData) {
+        justAddedFromPopup = true;
+        window.AirportApp.justAddedAirport = true;
+        setTimeout(function () { justAddedFromPopup = false; window.AirportApp.justAddedAirport = false; }, 50);
+        addWaypoint(source.getLatLng(), source._airportData);
+        map.closePopup(e.popup);
+      } else if (source._waypointData) {
+        var wpData = source._waypointData;
+        justAddedFromPopup = true;
+        window.AirportApp.justAddedAirport = true;
+        setTimeout(function () { justAddedFromPopup = false; window.AirportApp.justAddedAirport = false; }, 50);
+        addNamedWaypoint(source.getLatLng(), wpData.code, wpData.name);
+        map.closePopup(e.popup);
+      }
     });
 
     // Recalculate when fuel/power changes
@@ -3974,6 +3994,7 @@
   window.AirportApp.getRouteState = getRouteState;
   window.AirportApp.loadRoute = loadRoute;
   window.AirportApp.addMapWaypoint = addMapWaypoint;
+  window.AirportApp.addNamedWaypoint = addNamedWaypoint;
 
   // --- Init ---
 

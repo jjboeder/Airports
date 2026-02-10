@@ -587,6 +587,246 @@ NOTAMs: ${d.destination && d.destination.notams && d.destination.notams.length >
       }
     }
 
+    // Route: /ar/area-notams?firs=EFIN,ESAA (Autorouter NOTAM by FIR — airspace activation)
+    if (path === '/ar/area-notams' && request.method === 'GET') {
+      const firs = url.searchParams.get('firs') || '';
+      const firList = firs.split(',').filter(Boolean);
+      if (firList.length === 0 || firList.length > 5 || !firList.every(f => /^[A-Z]{4}$/.test(f))) {
+        return jsonError('firs must be 1-5 valid 4-letter FIR codes', 400);
+      }
+
+      const cache = caches.default;
+      const cacheKey = new Request('https://area-notams-cache/' + firList.join(','));
+      let cached = await cache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+
+      try {
+        const token = await getArToken(env);
+        const now = Math.floor(Date.now() / 1000);
+        const in24h = now + 86400;
+        const itemas = JSON.stringify(firList);
+        // Fetch NOTAMs relevant to airspace activation (Q-code starts with QR, QD, QP for restricted/danger/prohibited)
+        let allRows = [];
+        let offset = 0;
+        let total = Infinity;
+        while (offset < total && offset < 500) {
+          const qs = new URLSearchParams({
+            itemas,
+            offset: String(offset),
+            limit: '100',
+            startvalidity: String(now),
+            endvalidity: String(in24h)
+          });
+          const resp = await fetch('https://api.autorouter.aero/v1.0/notam?' + qs.toString(), {
+            headers: { 'Authorization': 'Bearer ' + token }
+          });
+          if (!resp.ok) {
+            const errText = await resp.text();
+            return jsonError('autorouter notam error: ' + resp.status + ' ' + errText, 502);
+          }
+          const data = await resp.json();
+          total = data.total || 0;
+          if (data.rows) allRows = allRows.concat(data.rows);
+          offset += 100;
+        }
+
+        // Filter to NOTAMs mentioning R/D/P area designators (e.g. EFD117C, EFR93A)
+        const areaNotams = allRows.filter(n => {
+          return /\b[A-Z]{2}[DRP]\d{2,}/i.test(n.iteme || '');
+        });
+
+        const body = JSON.stringify({ total: areaNotams.length, rows: areaNotams });
+        const cacheResp = new Response(body, {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=1800' }
+        });
+        await cache.put(cacheKey, cacheResp.clone());
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
+        });
+      } catch (e) {
+        return jsonError('area-notams error: ' + e.message, 502);
+      }
+    }
+
+    // Route: /airspace-tiles/:z/:x/:y.png (OpenAIP tile proxy)
+    const airspaceTileMatch = path.match(/^\/airspace-tiles\/(\d+)\/(\d+)\/(\d+)\.png$/);
+    if (airspaceTileMatch) {
+      const [, z, x, y] = airspaceTileMatch;
+      const upstream = `https://a.api.tiles.openaip.net/api/data/openaip/${z}/${x}/${y}.png?apiKey=${env.OPENAIP_KEY}`;
+      const resp = await fetch(upstream, {
+        cf: { cacheTtl: 86400, cacheEverything: true }
+      });
+      const headers = new Headers(resp.headers);
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+      return new Response(resp.body, { status: resp.status, headers });
+    }
+
+    // Route: /airspaces?bbox=...&type=1,2,3 (OpenAIP vector airspace proxy)
+    if (path === '/airspaces') {
+      const bbox = url.searchParams.get('bbox') || '';
+      const type = url.searchParams.get('type') || '1,2,3';
+      if (!bbox || bbox.split(',').length !== 4) {
+        return jsonError('bbox=west,south,east,north required', 400);
+      }
+      // Validate type codes
+      const typeCodes = type.split(',').filter(Boolean);
+      if (!typeCodes.every(t => /^\d+$/.test(t))) {
+        return jsonError('type must be comma-separated integers', 400);
+      }
+
+      const cache = caches.default;
+      const cacheKey = new Request('https://airspace-cache/' + bbox + '/' + type);
+      let cached = await cache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+
+      try {
+        // Fetch all pages from OpenAIP
+        let allItems = [];
+        let page = 1;
+        let totalPages = 1;
+        while (page <= totalPages) {
+          const qs = new URLSearchParams({ page: String(page), limit: '1000' });
+          // Add each type code separately as the API expects repeated params
+          typeCodes.forEach(t => qs.append('type', t));
+          // bbox format for OpenAIP: west,south,east,north (same as our param)
+          const upstream = `https://api.core.openaip.net/api/airspaces?${qs.toString()}&bbox=${bbox}`;
+          const resp = await fetch(upstream, {
+            headers: { 'x-openaip-api-key': env.OPENAIP_KEY }
+          });
+          if (!resp.ok) {
+            const errText = await resp.text();
+            return jsonError('OpenAIP API error: ' + resp.status + ' ' + errText, 502);
+          }
+          const data = await resp.json();
+          if (data.items) allItems = allItems.concat(data.items);
+          totalPages = data.totalPages || 1;
+          page++;
+          if (page > 20) break; // safety limit
+        }
+
+        const body = JSON.stringify({ items: allItems });
+        const cacheResp = new Response(body, {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' }
+        });
+        await cache.put(cacheKey, cacheResp.clone());
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
+        });
+      } catch (e) {
+        return jsonError('airspace fetch error: ' + e.message, 502);
+      }
+    }
+
+    // Route: /navaids?bbox=west,south,east,north (OpenAIP navaids proxy)
+    if (path === '/navaids') {
+      const bbox = url.searchParams.get('bbox') || '';
+      if (!bbox || bbox.split(',').length !== 4) {
+        return jsonError('bbox=west,south,east,north required', 400);
+      }
+
+      const cache = caches.default;
+      const cacheKey = new Request('https://navaids-cache/' + bbox);
+      let cached = await cache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+
+      try {
+        let allItems = [];
+        let page = 1;
+        let totalPages = 1;
+        while (page <= totalPages) {
+          const upstream = `https://api.core.openaip.net/api/navaids?page=${page}&limit=1000&bbox=${bbox}`;
+          const resp = await fetch(upstream, {
+            headers: { 'x-openaip-api-key': env.OPENAIP_KEY }
+          });
+          if (!resp.ok) {
+            const errText = await resp.text();
+            return jsonError('OpenAIP navaids error: ' + resp.status + ' ' + errText, 502);
+          }
+          const data = await resp.json();
+          if (data.items) allItems = allItems.concat(data.items);
+          totalPages = data.totalPages || 1;
+          page++;
+          if (page > 20) break;
+        }
+
+        const body = JSON.stringify({ items: allItems });
+        const cacheResp = new Response(body, {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' }
+        });
+        await cache.put(cacheKey, cacheResp.clone());
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
+        });
+      } catch (e) {
+        return jsonError('navaids fetch error: ' + e.message, 502);
+      }
+    }
+
+    // Route: /reporting-points?bbox=west,south,east,north (OpenAIP fixes proxy)
+    if (path === '/reporting-points') {
+      const bbox = url.searchParams.get('bbox') || '';
+      if (!bbox || bbox.split(',').length !== 4) {
+        return jsonError('bbox=west,south,east,north required', 400);
+      }
+
+      const cache = caches.default;
+      const cacheKey = new Request('https://reporting-points-cache/' + bbox);
+      let cached = await cache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+
+      try {
+        let allItems = [];
+        let page = 1;
+        let totalPages = 1;
+        while (page <= totalPages) {
+          const upstream = `https://api.core.openaip.net/api/reporting-points?page=${page}&limit=1000&bbox=${bbox}`;
+          const resp = await fetch(upstream, {
+            headers: { 'x-openaip-api-key': env.OPENAIP_KEY }
+          });
+          if (!resp.ok) {
+            const errText = await resp.text();
+            return jsonError('OpenAIP reporting-points error: ' + resp.status + ' ' + errText, 502);
+          }
+          const data = await resp.json();
+          if (data.items) allItems = allItems.concat(data.items);
+          totalPages = data.totalPages || 1;
+          page++;
+          if (page > 20) break;
+        }
+
+        const body = JSON.stringify({ items: allItems });
+        const cacheResp = new Response(body, {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' }
+        });
+        await cache.put(cacheKey, cacheResp.clone());
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
+        });
+      } catch (e) {
+        return jsonError('reporting-points fetch error: ' + e.message, 502);
+      }
+    }
+
     // Route: /sigmet (international SIGMETs as GeoJSON)
     if (path === '/sigmet') {
       const cache = caches.default;

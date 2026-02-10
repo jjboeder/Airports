@@ -359,6 +359,712 @@
     setInterval(loadSigmets, 300000); // refresh every 5 minutes
   }
 
+  // --- Airspace R/D/P overlay ---
+  var AIRSPACE_TYPES = {
+    1: { label: 'Restricted', color: '#e74c3c', shortLabel: 'R' },
+    2: { label: 'Danger', color: '#e67e22', shortLabel: 'D' },
+    3: { label: 'Prohibited', color: '#8b0000', shortLabel: 'P' }
+  };
+
+  var DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  // OpenAIP dayOfWeek: 0=Mon..6=Sun; JS getUTCDay(): 0=Sun..6=Sat
+  function jsToOpenaipDay(jsDay) {
+    return (jsDay + 6) % 7;
+  }
+
+  // Classify airspace activation: 'active' | 'potential' | false
+  //  - 'active': confirmed active now (specific hours match, or Prohibited)
+  //  - 'potential': H24/unknown schedule, could be active (shown faintly)
+  //  - false: definitely inactive (outside validity, or today not in schedule)
+  function classifyAirspaceActivation(item) {
+    // Prohibited areas are always active
+    if (item.type === 3) return 'active';
+
+    var now = new Date();
+
+    // Outside validity period → definitely inactive
+    if (item.activeUntil && new Date(item.activeUntil).getTime() < now.getTime()) return false;
+    if (item.activeFrom && new Date(item.activeFrom).getTime() > now.getTime()) return false;
+
+    var hrs = item.hoursOfOperation && item.hoursOfOperation.operatingHours;
+    if (!hrs || hrs.length === 0) return 'potential'; // no schedule data
+
+    var todayOA = jsToOpenaipDay(now.getUTCDay());
+    var nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+    // Find entries for today
+    var todayEntries = hrs.filter(function (h) { return h.dayOfWeek === todayOA; });
+    if (todayEntries.length === 0) return false; // no entry for today
+
+    var hasH24 = false;
+    for (var i = 0; i < todayEntries.length; i++) {
+      var h = todayEntries[i];
+      var startParts = (h.startTime || '00:00').split(':');
+      var endParts = (h.endTime || '00:00').split(':');
+      var startMin = parseInt(startParts[0], 10) * 60 + parseInt(startParts[1], 10);
+      var endMin = parseInt(endParts[0], 10) * 60 + parseInt(endParts[1], 10);
+
+      if (startMin === 0 && endMin === 0) {
+        hasH24 = true; // H24 = potentially active, not confirmed
+      } else if (nowMinutes >= startMin && nowMinutes < endMin) {
+        return 'active'; // specific hours and we're within them
+      }
+    }
+
+    return hasH24 ? 'potential' : false;
+  }
+
+  // Format operating hours for today for the popup
+  function formatTodayHours(item) {
+    var hrs = item.hoursOfOperation && item.hoursOfOperation.operatingHours;
+    if (!hrs || hrs.length === 0) return 'Hours unknown';
+
+    var now = new Date();
+    var todayOA = jsToOpenaipDay(now.getUTCDay());
+    var todayEntries = hrs.filter(function (h) { return h.dayOfWeek === todayOA; });
+
+    if (todayEntries.length === 0) return 'Inactive today (' + DAY_NAMES[todayOA] + ')';
+
+    var times = todayEntries.map(function (h) {
+      var st = h.startTime || '00:00';
+      var et = h.endTime || '00:00';
+      if (st === '00:00' && et === '00:00') return 'H24';
+      return st + '\u2013' + et + ' UTC';
+    });
+
+    return DAY_NAMES[todayOA] + ': ' + times.join(', ');
+  }
+
+  // Build a compact weekly schedule string
+  function formatWeeklySchedule(item) {
+    var hrs = item.hoursOfOperation && item.hoursOfOperation.operatingHours;
+    if (!hrs || hrs.length === 0) return '';
+
+    // Group by time window
+    var daysByTime = {};
+    for (var i = 0; i < hrs.length; i++) {
+      var h = hrs[i];
+      var st = h.startTime || '00:00';
+      var et = h.endTime || '00:00';
+      var key = (st === '00:00' && et === '00:00') ? 'H24' : st + '\u2013' + et;
+      if (!daysByTime[key]) daysByTime[key] = [];
+      daysByTime[key].push(h.dayOfWeek);
+    }
+
+    var keys = Object.keys(daysByTime);
+    // If all 7 days with same time → simplify
+    if (keys.length === 1 && daysByTime[keys[0]].length === 7) {
+      return keys[0] === 'H24' ? 'H24' : 'Daily ' + keys[0] + ' UTC';
+    }
+
+    var parts = [];
+    keys.forEach(function (k) {
+      var days = daysByTime[k].sort();
+      var dayStr = days.map(function (d) { return DAY_NAMES[d]; }).join(',');
+      parts.push(dayStr + ' ' + k);
+    });
+    return parts.join('; ');
+  }
+
+  function formatAirspaceLimit(limit) {
+    if (!limit) return '?';
+    var val = limit.value;
+    var unit = limit.unit; // 0=Meter, 1=Feet, 6=FL
+    var ref = limit.referenceDatum; // 0=GND, 1=MSL, 2=STD
+    if (unit === 6) return 'FL' + val;
+    if (ref === 0 && val === 0) return 'GND';
+    var ft = unit === 0 ? Math.round(val * 3.281) : val;
+    var refStr = ref === 0 ? ' AGL' : ref === 1 ? ' AMSL' : '';
+    return ft + ' ft' + refStr;
+  }
+
+  function formatUtcDate(iso) {
+    if (!iso) return '?';
+    var d = new Date(iso);
+    var dd = String(d.getUTCDate()).padStart(2, '0');
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return dd + ' ' + months[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+  }
+
+  function airspacePopupHtml(item) {
+    var typeInfo = AIRSPACE_TYPES[item.type] || { label: 'Airspace', color: '#888', shortLabel: '?' };
+    var html = '<div class="airspace-popup">';
+    html += '<span class="airspace-type-badge" style="background:' + typeInfo.color + ';">' + typeInfo.label + '</span>';
+    var notam = item._activatingNotam;
+    var activation = classifyAirspaceActivation(item);
+    if (notam) activation = 'active';
+    if (activation === 'active') {
+      html += ' <span class="airspace-status-badge airspace-status-active">ACTIVE</span>';
+    } else {
+      html += ' <span class="airspace-status-badge airspace-status-potential">POTENTIALLY ACTIVE</span>';
+    }
+    if (item.byNotam) {
+      html += ' <span class="airspace-bynotam-badge">BY NOTAM</span>';
+    }
+    html += '<div class="airspace-name">' + (item.name || 'Unknown') + '</div>';
+
+    // Country
+    if (item.country) {
+      html += '<div class="airspace-country">' + item.country + '</div>';
+    }
+
+    // Vertical limits
+    var lower = formatAirspaceLimit(item.lowerLimit);
+    var upper = formatAirspaceLimit(item.upperLimit);
+    html += '<div class="airspace-limits">' + lower + ' \u2013 ' + upper + '</div>';
+
+    // Validity period
+    if (item.activeFrom || item.activeUntil) {
+      var from = formatUtcDate(item.activeFrom);
+      var until = formatUtcDate(item.activeUntil);
+      html += '<div class="airspace-validity">Valid: ' + from + ' \u2013 ' + until + '</div>';
+    }
+
+    // Today's hours
+    var todayStr = formatTodayHours(item);
+    html += '<div class="airspace-hours-today">' + todayStr + '</div>';
+
+    // Full weekly schedule
+    var weeklyStr = formatWeeklySchedule(item);
+    if (weeklyStr && weeklyStr !== todayStr) {
+      html += '<div class="airspace-hours-weekly">' + weeklyStr + '</div>';
+    }
+
+    // Frequencies
+    if (item.frequencies && item.frequencies.length > 0) {
+      var freqs = item.frequencies.map(function (f) {
+        var label = f.name || '';
+        return '<span class="airspace-freq">' + f.value + (label ? ' <span class="airspace-freq-name">' + label + '</span>' : '') + '</span>';
+      });
+      html += '<div class="airspace-frequencies">' + freqs.join(' ') + '</div>';
+    }
+
+    // Remarks
+    if (item.remarks) {
+      html += '<div class="airspace-remarks">' + item.remarks + '</div>';
+    }
+
+    // Activating NOTAM
+    if (notam) {
+      var nid = (notam.series || '') + (notam.number || '') + '/' + (notam.year || '');
+      var ntext = (notam.iteme || '').replace(/</g, '&lt;');
+      html += '<div class="airspace-notam">';
+      html += '<div class="airspace-notam-hdr">NOTAM ' + nid + '</div>';
+      if (notam.itemd) {
+        html += '<div class="airspace-notam-schedule">' + notam.itemd + '</div>';
+      }
+      if (notam.startvalidity || notam.endvalidity) {
+        var sv = notam.startvalidity ? formatUtcDate(new Date(notam.startvalidity * 1000).toISOString()) : '?';
+        var ev = notam.endvalidity ? formatUtcDate(new Date(notam.endvalidity * 1000).toISOString()) : '?';
+        html += '<div class="airspace-notam-validity">' + sv + ' \u2013 ' + ev + '</div>';
+      }
+      html += '<div class="airspace-notam-text">' + ntext + '</div>';
+      if (notam.upper != null || notam.lower != null) {
+        var lo = notam.lower != null ? (notam.lower === 0 ? 'GND' : 'FL' + notam.lower) : '?';
+        var hi = notam.upper != null ? 'FL' + notam.upper : '?';
+        html += '<div class="airspace-notam-alt">' + lo + ' \u2013 ' + hi + '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  // European FIR codes by country ISO2 (main FIRs for airspace activation NOTAMs)
+  var COUNTRY_FIRS = {
+    FI: ['EFIN'], EE: ['EETT'], LV: ['EVRR'], LT: ['EYVL'],
+    SE: ['ESAA'], NO: ['ENOR','ENOB'], DK: ['EKDK'],
+    DE: ['EDGG','EDMM','EDWW'], PL: ['EPWW'], CZ: ['LKAA'],
+    AT: ['LOVV'], CH: ['LSAS'], FR: ['LFFF','LFBB','LFEE','LFRR','LFMM'],
+    GB: ['EGTT','EGPX'], IE: ['EISN'], NL: ['EHAA'], BE: ['EBBU'],
+    LU: ['ELLX'], IT: ['LIMM','LIRR','LIBB'], ES: ['LECM','LECB'],
+    PT: ['LPPC'], GR: ['LGGG'], TR: ['LTAA'], HU: ['LHCC'],
+    RO: ['LRBB'], BG: ['LBSR'], SK: ['LZBB'], HR: ['LDZO'],
+    SI: ['LJLA'], RS: ['LYBA'], IS: ['BIRD']
+  };
+
+  // Extract area designators activated by NOTAM from NOTAM text
+  function extractActiveDesignators(notamRows) {
+    var active = {};
+    var designatorRe = /\b([A-Z]{2}[DRP]\d+[A-Z]?\d*)\b/g;
+    notamRows.forEach(function (n) {
+      var text = n.iteme || '';
+      var match;
+      while ((match = designatorRe.exec(text)) !== null) {
+        active[match[1]] = n;
+      }
+      designatorRe.lastIndex = 0;
+    });
+    return active;
+  }
+
+  // Check if an airspace name contains any of the active designators
+  function findNotamForAirspace(item, activeDesignators) {
+    var name = item.name || '';
+    // The OpenAIP name is like "EFD117C PAROLA" — extract the designator part
+    var designatorRe = /\b([A-Z]{2}[DRP]\d+[A-Z]?\d*)\b/g;
+    var match;
+    while ((match = designatorRe.exec(name)) !== null) {
+      if (activeDesignators[match[1]]) return activeDesignators[match[1]];
+    }
+    return null;
+  }
+
+  function setupAirspaceLayer(layerGroup) {
+    var loadedIds = {};
+    var debounceTimer = null;
+    var MIN_ZOOM = 7;
+    var activeDesignators = {}; // populated from NOTAMs
+    var notamFetchedFirs = {}; // track which FIRs we've already fetched
+
+    function fetchAreaNotams(countries) {
+      // Determine which FIRs to query based on visible countries
+      var firs = [];
+      var seen = {};
+      countries.forEach(function (cc) {
+        var firList = COUNTRY_FIRS[cc] || [];
+        firList.forEach(function (f) {
+          if (!seen[f] && !notamFetchedFirs[f]) {
+            firs.push(f);
+            seen[f] = true;
+          }
+        });
+      });
+      if (firs.length === 0) return Promise.resolve();
+
+      // Batch into groups of 5
+      var batches = [];
+      for (var i = 0; i < firs.length; i += 5) {
+        batches.push(firs.slice(i, i + 5));
+      }
+
+      return Promise.all(batches.map(function (batch) {
+        return fetch(OWM_PROXY + '/ar/area-notams?firs=' + batch.join(','))
+          .then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+          })
+          .then(function (data) {
+            if (data && data.rows) {
+              var newDesignators = extractActiveDesignators(data.rows);
+              Object.keys(newDesignators).forEach(function (k) {
+                activeDesignators[k] = newDesignators[k];
+              });
+            }
+            batch.forEach(function (f) { notamFetchedFirs[f] = true; });
+          })
+          .catch(function (err) {
+            console.error('Area NOTAM fetch error:', err);
+          });
+      }));
+    }
+
+    function renderAirspaces(items) {
+      items.forEach(function (item) {
+        var id = item._id || item.id;
+        if (loadedIds[id]) return;
+        loadedIds[id] = true;
+
+        if (!item.geometry) return;
+
+        // Classify: check schedule, then upgrade with NOTAM data
+        var activation = classifyAirspaceActivation(item);
+        if (!activation) return; // outside validity or not today
+
+        var notam = findNotamForAirspace(item, activeDesignators);
+        if (notam) activation = 'active';
+        // Store NOTAM ref for popup
+        item._activatingNotam = notam;
+
+        var typeInfo = AIRSPACE_TYPES[item.type] || { label: 'Airspace', color: '#888' };
+        var isActive = activation === 'active';
+
+        var polygon = L.geoJSON(item.geometry, {
+          style: {
+            color: typeInfo.color,
+            weight: isActive ? 2 : 1,
+            opacity: isActive ? 0.8 : 0.35,
+            fillColor: typeInfo.color,
+            fillOpacity: isActive ? 0.2 : 0.05,
+            dashArray: isActive ? null : '4,6'
+          }
+        });
+
+        polygon.bindPopup(airspacePopupHtml(item), {
+          maxWidth: 420,
+          minWidth: 280,
+          className: 'airspace-popup-wrapper'
+        });
+
+        polygon.addTo(layerGroup);
+      });
+    }
+
+    function loadAirspaces() {
+      if (map.getZoom() < MIN_ZOOM) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+        return;
+      }
+
+      var bounds = map.getBounds();
+      var bbox = [
+        bounds.getWest().toFixed(4),
+        bounds.getSouth().toFixed(4),
+        bounds.getEast().toFixed(4),
+        bounds.getNorth().toFixed(4)
+      ].join(',');
+
+      fetch(OWM_PROXY + '/airspaces?bbox=' + bbox + '&type=1,2,3')
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          if (!data || !data.items || data.items.length === 0) return;
+
+          // Collect unique countries from returned items
+          var countries = {};
+          data.items.forEach(function (item) {
+            if (item.country) countries[item.country] = true;
+          });
+
+          // Fetch NOTAMs for new FIRs, then render
+          fetchAreaNotams(Object.keys(countries)).then(function () {
+            renderAirspaces(data.items);
+          });
+        })
+        .catch(function (err) {
+          console.error('Airspace load error:', err);
+        });
+    }
+
+    map.on('moveend', function () {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadAirspaces, 500);
+    });
+
+    // Also clear dedup cache when layer is removed from map
+    map.on('overlayremove', function (e) {
+      if (e.layer === layerGroup) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+      }
+    });
+
+    // Load if already on map at sufficient zoom
+    if (map.hasLayer(layerGroup)) {
+      loadAirspaces();
+    }
+
+    // Load when layer is added
+    map.on('overlayadd', function (e) {
+      if (e.layer === layerGroup) {
+        loadAirspaces();
+      }
+    });
+  }
+
+  // --- IFR Fixes overlay (static data from earth_fix.dat) ---
+
+  function setupFixesLayer(layerGroup) {
+    var allFixes = null; // loaded once: [[lat, lon, ident], ...]
+    var currentMarkers = []; // track markers in current view
+    var MIN_ZOOM = 7;
+    var LABEL_ZOOM = 8;
+
+    function loadData() {
+      if (allFixes) return Promise.resolve(allFixes);
+      return fetch('data/fixes.json')
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          allFixes = data;
+          return data;
+        });
+    }
+
+    function renderFixes() {
+      if (map.getZoom() < MIN_ZOOM) {
+        layerGroup.clearLayers();
+        currentMarkers = [];
+        return;
+      }
+
+      loadData().then(function (fixes) {
+        layerGroup.clearLayers();
+        currentMarkers = [];
+
+        var bounds = map.getBounds();
+        var south = bounds.getSouth(), north = bounds.getNorth();
+        var west = bounds.getWest(), east = bounds.getEast();
+        var showLabels = map.getZoom() >= LABEL_ZOOM;
+
+        for (var i = 0; i < fixes.length; i++) {
+          var lat = fixes[i][0], lon = fixes[i][1], ident = fixes[i][2];
+          if (lat < south || lat > north || lon < west || lon > east) continue;
+
+          var iconHtml = '<div class="wp-icon"><div class="wp-icon-ifr-fix"></div>';
+          if (showLabels) {
+            iconHtml += '<span class="wp-label-fix">' + ident + '</span>';
+          }
+          iconHtml += '</div>';
+
+          var marker = L.marker([lat, lon], {
+            icon: L.divIcon({
+              className: 'wp-marker',
+              html: iconHtml,
+              iconSize: [showLabels ? 56 : 10, 10],
+              iconAnchor: [showLabels ? 4 : 4, 5]
+            })
+          });
+
+          marker.bindTooltip(ident, { direction: 'top', offset: [0, -4] });
+          marker.bindPopup(
+            '<div class="wp-popup-name">' + ident + '</div>' +
+            '<div class="wp-popup-type">IFR Fix</div>',
+            { maxWidth: 200, className: 'waypoint-popup' }
+          );
+          marker._waypointData = { code: ident, name: ident };
+          marker.addTo(layerGroup);
+          currentMarkers.push(marker);
+        }
+      }).catch(function (err) {
+        console.error('Fixes load error:', err);
+      });
+    }
+
+    var debounceTimer = null;
+    map.on('moveend', function () {
+      if (!map.hasLayer(layerGroup)) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(renderFixes, 300);
+    });
+
+    map.on('overlayremove', function (e) {
+      if (e.layer === layerGroup) {
+        layerGroup.clearLayers();
+        currentMarkers = [];
+      }
+    });
+
+    map.on('overlayadd', function (e) {
+      if (e.layer === layerGroup) {
+        renderFixes();
+      }
+    });
+
+    if (map.hasLayer(layerGroup)) {
+      renderFixes();
+    }
+  }
+
+  // --- Navaids + VFR Reporting Points overlay (OpenAIP) ---
+
+  var NAVAID_TYPES = {
+    0: { label: 'DME', css: 'dme' },
+    1: { label: 'TACAN', css: 'dme' },
+    2: { label: 'NDB', css: 'ndb' },
+    3: { label: 'VOR', css: 'vor' },
+    4: { label: 'VOR-DME', css: 'vor' },
+    5: { label: 'VORTAC', css: 'vor' },
+    6: { label: 'DVOR', css: 'vor' },
+    7: { label: 'DVOR-DME', css: 'vor' },
+    8: { label: 'DVORTAC', css: 'vor' }
+  };
+
+  function setupWaypointsLayer(layerGroup) {
+    var loadedIds = {};
+    var debounceTimer = null;
+    var MIN_ZOOM = 7;
+    var LABEL_ZOOM = 7;
+
+    function navaidPopupHtml(item) {
+      var typeInfo = NAVAID_TYPES[item.type] || { label: 'Navaid', css: 'vor' };
+      var html = '<div class="wp-popup-name">' + (item.name || 'Unknown') + '</div>';
+      html += '<div class="wp-popup-ident">' + (item.identifier || '') + '</div>';
+      html += '<div class="wp-popup-type">' + typeInfo.label + '</div>';
+      if (item.frequency && item.frequency.value) {
+        var unit = item.frequency.unit === 1 ? ' kHz' : ' MHz';
+        html += '<div class="wp-popup-freq">' + item.frequency.value + unit + '</div>';
+      }
+      if (item.elevation && item.elevation.value != null) {
+        var ft = item.elevation.unit === 0 ? Math.round(item.elevation.value * 3.281) : item.elevation.value;
+        html += '<div class="wp-popup-elev">Elev: ' + ft + ' ft</div>';
+      }
+      return html;
+    }
+
+    function fixPopupHtml(item) {
+      var html = '<div class="wp-popup-name">' + (item.name || 'Unknown') + '</div>';
+      html += '<div class="wp-popup-type">' + (item.compulsory ? 'Compulsory Reporting Point' : 'Reporting Point') + '</div>';
+      if (item.elevation && item.elevation.value != null) {
+        var ft = item.elevation.unit === 0 ? Math.round(item.elevation.value * 3.281) : item.elevation.value;
+        html += '<div class="wp-popup-elev">Elev: ' + ft + ' ft</div>';
+      }
+      return html;
+    }
+
+    function createNavaidMarker(item, showLabel) {
+      var coords = item.geometry && item.geometry.coordinates;
+      if (!coords) return null;
+      var lat = coords[1], lon = coords[0];
+      var typeInfo = NAVAID_TYPES[item.type] || { label: 'Navaid', css: 'vor' };
+      var ident = item.identifier || '';
+
+      var iconHtml = '<div class="wp-icon"><div class="wp-icon-' + typeInfo.css + '"></div>';
+      if (showLabel && ident) {
+        iconHtml += '<span class="wp-label">' + ident + '</span>';
+      }
+      iconHtml += '</div>';
+
+      var marker = L.marker([lat, lon], {
+        icon: L.divIcon({
+          className: 'wp-marker',
+          html: iconHtml,
+          iconSize: [showLabel ? 60 : 12, 12],
+          iconAnchor: [showLabel ? 6 : 5, 6]
+        })
+      });
+
+      marker.bindPopup(navaidPopupHtml(item), {
+        maxWidth: 280,
+        className: 'waypoint-popup'
+      });
+
+      var tooltipText = ident + (item.name && item.name !== ident ? ' ' + item.name : '');
+      marker.bindTooltip(tooltipText, { direction: 'top', offset: [0, -6] });
+
+      marker._waypointData = { code: ident, name: item.name || ident };
+
+      return marker;
+    }
+
+    function createFixMarker(item, showLabel) {
+      var coords = item.geometry && item.geometry.coordinates;
+      if (!coords) return null;
+      var lat = coords[1], lon = coords[0];
+      var name = item.name || '';
+      var cssClass = item.compulsory ? 'wp-icon-fix-compulsory' : 'wp-icon-fix';
+
+      var iconHtml = '<div class="wp-icon"><div class="' + cssClass + '"></div>';
+      if (showLabel && name) {
+        iconHtml += '<span class="wp-label">' + name + '</span>';
+      }
+      iconHtml += '</div>';
+
+      var marker = L.marker([lat, lon], {
+        icon: L.divIcon({
+          className: 'wp-marker',
+          html: iconHtml,
+          iconSize: [showLabel ? 56 : 10, 10],
+          iconAnchor: [showLabel ? 4 : 4, 7]
+        })
+      });
+
+      marker.bindPopup(fixPopupHtml(item), {
+        maxWidth: 280,
+        className: 'waypoint-popup'
+      });
+
+      marker.bindTooltip(name, { direction: 'top', offset: [0, -4] });
+
+      marker._waypointData = { code: name, name: name };
+
+      return marker;
+    }
+
+    function loadWaypoints() {
+      if (map.getZoom() < MIN_ZOOM) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+        return;
+      }
+
+      var bounds = map.getBounds();
+      var bbox = [
+        bounds.getWest().toFixed(4),
+        bounds.getSouth().toFixed(4),
+        bounds.getEast().toFixed(4),
+        bounds.getNorth().toFixed(4)
+      ].join(',');
+
+      var showLabels = map.getZoom() >= LABEL_ZOOM;
+
+      Promise.all([
+        fetch(OWM_PROXY + '/navaids?bbox=' + bbox).then(function (r) { return r.ok ? r.json() : { items: [] }; }),
+        fetch(OWM_PROXY + '/reporting-points?bbox=' + bbox).then(function (r) { return r.ok ? r.json() : { items: [] }; })
+      ]).then(function (results) {
+        var navaids = results[0].items || [];
+        var fixes = results[1].items || [];
+
+        navaids.forEach(function (item) {
+          var id = 'nav_' + (item._id || item.id);
+          if (loadedIds[id]) return;
+          loadedIds[id] = true;
+          var marker = createNavaidMarker(item, showLabels);
+          if (marker) marker.addTo(layerGroup);
+        });
+
+        fixes.forEach(function (item) {
+          var id = 'fix_' + (item._id || item.id);
+          if (loadedIds[id]) return;
+          loadedIds[id] = true;
+          var marker = createFixMarker(item, showLabels);
+          if (marker) marker.addTo(layerGroup);
+        });
+      }).catch(function (err) {
+        console.error('Waypoints load error:', err);
+      });
+    }
+
+    // Debounced load on moveend
+    map.on('moveend', function () {
+      if (!map.hasLayer(layerGroup)) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadWaypoints, 500);
+    });
+
+    // Re-render labels when crossing the label zoom threshold
+    map.on('zoomend', function () {
+      if (!map.hasLayer(layerGroup)) return;
+      var showLabels = map.getZoom() >= LABEL_ZOOM;
+      var prevShowLabels = layerGroup._wpLabelsShown;
+      if (showLabels !== prevShowLabels) {
+        // Must clear and reload to rebuild markers with/without labels
+        layerGroup.clearLayers();
+        loadedIds = {};
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(loadWaypoints, 200);
+      }
+      layerGroup._wpLabelsShown = showLabels;
+    });
+
+    // Clear when layer is removed
+    map.on('overlayremove', function (e) {
+      if (e.layer === layerGroup) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+      }
+    });
+
+    // Load when layer is added
+    map.on('overlayadd', function (e) {
+      if (e.layer === layerGroup) {
+        loadWaypoints();
+      }
+    });
+
+    // Load immediately if already on map
+    if (map.hasLayer(layerGroup)) {
+      loadWaypoints();
+    }
+  }
+
   function setupLayerControl() {
     const overlays = {};
 
@@ -385,6 +1091,29 @@
     var sigmetLayer = L.layerGroup();
     overlays['SIGMETs'] = sigmetLayer;
     setupSigmetLayer(sigmetLayer);
+
+    // OpenAIP airspace tile overlay
+    var airspaceTileLayer = L.tileLayer(OWM_PROXY + '/airspace-tiles/{z}/{x}/{y}.png', {
+      opacity: 1,
+      maxZoom: 14,
+      attribution: '&copy; <a href="https://www.openaip.net">OpenAIP</a>'
+    });
+    overlays['Airspace'] = airspaceTileLayer;
+
+    // R/D/P interactive polygon overlay
+    var airspaceVectorLayer = L.layerGroup();
+    overlays['R/D/P Areas'] = airspaceVectorLayer;
+    setupAirspaceLayer(airspaceVectorLayer);
+
+    // IFR Fixes overlay (static data)
+    var fixesLayer = L.layerGroup();
+    overlays['IFR Fixes'] = fixesLayer;
+    setupFixesLayer(fixesLayer);
+
+    // Navaids + VFR Reporting Points overlay (OpenAIP)
+    var waypointsLayer = L.layerGroup();
+    overlays['Reporting Points'] = waypointsLayer;
+    setupWaypointsLayer(waypointsLayer);
 
     // Airport layers will be added by airports.js via window.AirportApp
     window.AirportApp = window.AirportApp || {};

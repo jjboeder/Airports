@@ -2341,3 +2341,309 @@ html, body {
   max-height: 120px;
   overflow-y: auto;
 }
+
+/* Airspace R/D/P popup */
+.airspace-popup {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.airspace-type-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 3px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.airspace-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #222;
+  margin-bottom: 4px;
+}
+
+.airspace-limits {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  margin: 4px 0;
+}
+
+.airspace-status-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+
+.airspace-status-active {
+  background: #27ae60;
+  color: #fff;
+}
+
+.airspace-status-potential {
+  background: #e0e0e0;
+  color: #666;
+}
+
+.airspace-bynotam-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #f39c12;
+  color: #fff;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+
+.airspace-country {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.airspace-validity {
+  font-size: 11px;
+  color: #666;
+  margin: 4px 0 2px;
+  font-weight: 600;
+}
+
+.airspace-hours-today {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin: 4px 0 2px;
+}
+
+.airspace-hours-weekly {
+  font-size: 11px;
+  color: #888;
+  margin: 2px 0;
+}
+
+.airspace-frequencies {
+  margin: 4px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.airspace-freq {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #2980b9;
+  background: #e8f0fe;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.airspace-freq-name {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  color: #666;
+}
+
+.airspace-remarks {
+  font-size: 11px;
+  color: #888;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.airspace-notam {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #fef9e7;
+  border-radius: 4px;
+  border: 1px solid #f0e0a0;
+  border-left: 3px solid #e67e22;
+}
+
+.airspace-notam-hdr {
+  font-size: 11px;
+  font-weight: 700;
+  color: #e67e22;
+  margin-bottom: 2px;
+}
+
+.airspace-notam-schedule {
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 2px;
+}
+
+.airspace-notam-validity {
+  font-size: 10px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.airspace-notam-text {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 10px;
+  color: #444;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.airspace-notam-alt {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 10px;
+  color: #666;
+  margin-top: 2px;
+}
+
+/* IFR Waypoints: Navaids + Fixes */
+.wp-marker {
+  background: none !important;
+  border: none !important;
+  overflow: visible !important;
+}
+
+.wp-icon {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+/* VOR / VOR-DME / DVOR / DVOR-DME / DVORTAC / VORTAC hexagon */
+.wp-icon-vor {
+  width: 13px;
+  height: 13px;
+  background: #2980b9;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  flex-shrink: 0;
+}
+
+/* NDB circle */
+.wp-icon-ndb {
+  width: 10px;
+  height: 10px;
+  background: #c0392b;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* DME / TACAN square */
+.wp-icon-dme {
+  width: 10px;
+  height: 10px;
+  background: #27ae60;
+  flex-shrink: 0;
+}
+
+/* Fix / Reporting point triangle */
+.wp-icon-fix {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid #999;
+  flex-shrink: 0;
+}
+
+.wp-icon-fix-compulsory {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid #8e44ad;
+  flex-shrink: 0;
+}
+
+/* Small monospace label next to marker */
+.wp-label {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #333;
+  text-shadow:
+    -1px -1px 0 #fff,
+     1px -1px 0 #fff,
+    -1px  1px 0 #fff,
+     1px  1px 0 #fff;
+  pointer-events: none;
+  letter-spacing: 0.2px;
+}
+
+/* Waypoint popup content */
+.waypoint-popup .leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+.waypoint-popup .leaflet-popup-content {
+  margin: 10px 14px;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.wp-popup-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #222;
+  margin-bottom: 2px;
+}
+
+.wp-popup-ident {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 13px;
+  color: #2980b9;
+  font-weight: 600;
+}
+
+.wp-popup-type {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.wp-popup-freq {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+}
+
+.wp-popup-elev {
+  font-size: 11px;
+  color: #666;
+}
+
+/* IFR fix marker (small diamond) */
+.wp-icon-ifr-fix {
+  width: 8px;
+  height: 8px;
+  background: #2c3e50;
+  transform: rotate(45deg);
+  flex-shrink: 0;
+}
+
+.wp-label-fix {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  color: #555;
+  text-shadow:
+    -1px -1px 0 #fff,
+     1px -1px 0 #fff,
+    -1px  1px 0 #fff,
+     1px  1px 0 #fff;
+  pointer-events: none;
+  letter-spacing: 0.2px;
+}
