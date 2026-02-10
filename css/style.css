@@ -2625,25 +2625,3 @@ html, body {
   color: #666;
 }
 
-/* IFR fix marker (small diamond) */
-.wp-icon-ifr-fix {
-  width: 8px;
-  height: 8px;
-  background: #2c3e50;
-  transform: rotate(45deg);
-  flex-shrink: 0;
-}
-
-.wp-label-fix {
-  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
-  font-size: 9px;
-  font-weight: 600;
-  color: #555;
-  text-shadow:
-    -1px -1px 0 #fff,
-     1px -1px 0 #fff,
-    -1px  1px 0 #fff,
-     1px  1px 0 #fff;
-  pointer-events: none;
-  letter-spacing: 0.2px;
-}

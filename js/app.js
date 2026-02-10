@@ -767,102 +767,6 @@
     });
   }
 
-  // --- IFR Fixes overlay (static data from earth_fix.dat) ---
-
-  function setupFixesLayer(layerGroup) {
-    var allFixes = null; // loaded once: [[lat, lon, ident], ...]
-    var currentMarkers = []; // track markers in current view
-    var MIN_ZOOM = 7;
-    var LABEL_ZOOM = 8;
-
-    function loadData() {
-      if (allFixes) return Promise.resolve(allFixes);
-      return fetch('data/fixes.json')
-        .then(function (res) {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.json();
-        })
-        .then(function (data) {
-          allFixes = data;
-          return data;
-        });
-    }
-
-    function renderFixes() {
-      if (map.getZoom() < MIN_ZOOM) {
-        layerGroup.clearLayers();
-        currentMarkers = [];
-        return;
-      }
-
-      loadData().then(function (fixes) {
-        layerGroup.clearLayers();
-        currentMarkers = [];
-
-        var bounds = map.getBounds();
-        var south = bounds.getSouth(), north = bounds.getNorth();
-        var west = bounds.getWest(), east = bounds.getEast();
-        var showLabels = map.getZoom() >= LABEL_ZOOM;
-
-        for (var i = 0; i < fixes.length; i++) {
-          var lat = fixes[i][0], lon = fixes[i][1], ident = fixes[i][2];
-          if (lat < south || lat > north || lon < west || lon > east) continue;
-
-          var iconHtml = '<div class="wp-icon"><div class="wp-icon-ifr-fix"></div>';
-          if (showLabels) {
-            iconHtml += '<span class="wp-label-fix">' + ident + '</span>';
-          }
-          iconHtml += '</div>';
-
-          var marker = L.marker([lat, lon], {
-            icon: L.divIcon({
-              className: 'wp-marker',
-              html: iconHtml,
-              iconSize: [showLabels ? 56 : 10, 10],
-              iconAnchor: [showLabels ? 4 : 4, 5]
-            })
-          });
-
-          marker.bindTooltip(ident, { direction: 'top', offset: [0, -4] });
-          marker.bindPopup(
-            '<div class="wp-popup-name">' + ident + '</div>' +
-            '<div class="wp-popup-type">IFR Fix</div>',
-            { maxWidth: 200, className: 'waypoint-popup' }
-          );
-          marker._waypointData = { code: ident, name: ident };
-          marker.addTo(layerGroup);
-          currentMarkers.push(marker);
-        }
-      }).catch(function (err) {
-        console.error('Fixes load error:', err);
-      });
-    }
-
-    var debounceTimer = null;
-    map.on('moveend', function () {
-      if (!map.hasLayer(layerGroup)) return;
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(renderFixes, 300);
-    });
-
-    map.on('overlayremove', function (e) {
-      if (e.layer === layerGroup) {
-        layerGroup.clearLayers();
-        currentMarkers = [];
-      }
-    });
-
-    map.on('overlayadd', function (e) {
-      if (e.layer === layerGroup) {
-        renderFixes();
-      }
-    });
-
-    if (map.hasLayer(layerGroup)) {
-      renderFixes();
-    }
-  }
-
   // --- Navaids + VFR Reporting Points overlay (OpenAIP) ---
 
   var NAVAID_TYPES = {
@@ -1104,11 +1008,6 @@
     var airspaceVectorLayer = L.layerGroup();
     overlays['R/D/P Areas'] = airspaceVectorLayer;
     setupAirspaceLayer(airspaceVectorLayer);
-
-    // IFR Fixes overlay (static data)
-    var fixesLayer = L.layerGroup();
-    overlays['IFR Fixes'] = fixesLayer;
-    setupFixesLayer(fixesLayer);
 
     // Navaids + VFR Reporting Points overlay (OpenAIP)
     var waypointsLayer = L.layerGroup();
