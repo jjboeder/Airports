@@ -587,8 +587,12 @@
   // --- Airgram: Vertical profile chart (clouds + wind at altitude) ---
 
   var AIRGRAM_LEVELS = [1000, 925, 850, 775, 700, 600, 500, 450];
-  var AIRGRAM_VARS = ['temperature', 'wind_speed', 'wind_direction', 'cloud_cover', 'geopotential_height'];
-  // Fixed FL labels for Y-axis (ft values)
+  var AIRGRAM_VARS = ['temperature', 'wind_speed', 'wind_direction', 'cloud_cover', 'geopotential_height', 'relative_humidity'];
+  var AIRGRAM_MIN_FT = 0;
+  var AIRGRAM_MAX_FT = 20000;
+  var AIRGRAM_MIN_M = 0;
+  var AIRGRAM_MAX_M = 6096; // 20000 ft in meters
+  // Default FL labels for route airgram (FL000 to FL200)
   var AIRGRAM_FL_LABELS = [
     { label: 'FL000', ft: 0 },
     { label: 'FL025', ft: 2500 },
@@ -600,10 +604,23 @@
     { label: 'FL175', ft: 17500 },
     { label: 'FL200', ft: 20000 }
   ];
-  var AIRGRAM_MIN_FT = 0;
-  var AIRGRAM_MAX_FT = 20000;
-  var AIRGRAM_MIN_M = 0;
-  var AIRGRAM_MAX_M = 6096; // 20000 ft in meters
+
+  // Build FL labels from airport elevation up to FL200 (absolute FLs)
+  function buildFlLabels(elevFt) {
+    var labels = [];
+    // First label is the airport elevation itself
+    var elevRounded = Math.round(elevFt);
+    labels.push({ label: elevRounded + ' ft', ft: elevRounded });
+    // Then FL025, FL050, FL075, ... FL200
+    for (var fl = 25; fl <= 200; fl += 25) {
+      var ft = fl * 100;
+      if (ft > elevRounded) {
+        var flStr = fl < 100 ? '0' + fl : '' + fl;
+        labels.push({ label: 'FL' + flStr, ft: ft });
+      }
+    }
+    return labels;
+  }
 
   function buildAirgramUrl(lat, lon) {
     var params = [];
@@ -700,12 +717,14 @@
     ctx.restore();
   }
 
-  function renderAirgram(el, data) {
+  function renderAirgram(el, data, elevFt) {
     var hourly = data.hourly;
     if (!hourly || !hourly.time) {
       el.innerHTML = '<span class="info-unknown">No airgram data</span>';
       return;
     }
+    elevFt = elevFt || 0;
+    var flLabels = buildFlLabels(elevFt);
 
     var nHours = Math.min(hourly.time.length, 24);
     var nLevels = AIRGRAM_LEVELS.length;
@@ -720,13 +739,15 @@
       var wdKey = 'wind_direction_' + lev + 'hPa';
       var ccKey = 'cloud_cover_' + lev + 'hPa';
       var ghKey = 'geopotential_height_' + lev + 'hPa';
+      var rhKey = 'relative_humidity_' + lev + 'hPa';
       for (var hi = 0; hi < nHours; hi++) {
         grid[li][hi] = {
           temp: hourly[tempKey] ? hourly[tempKey][hi] : null,
           windSpd: hourly[wsKey] ? hourly[wsKey][hi] : null,
           windDir: hourly[wdKey] ? hourly[wdKey][hi] : null,
           cloud: hourly[ccKey] ? hourly[ccKey][hi] : null,
-          geoHt: hourly[ghKey] ? hourly[ghKey][hi] : null
+          geoHt: hourly[ghKey] ? hourly[ghKey][hi] : null,
+          rh: hourly[rhKey] ? hourly[rhKey][hi] : null
         };
       }
     }
@@ -769,8 +790,8 @@
       if (geoHts[li] == null) geoHts[li] = stdHts[li];
     }
 
-    // Fixed Y range: 0 to FL200 (0 to 6096 m)
-    var minHt = AIRGRAM_MIN_M;
+    // Y range: airport elevation to FL200
+    var minHt = elevFt * 0.3048;
     var maxHt = AIRGRAM_MAX_M;
     function htToY(ht) {
       var frac = (ht - minHt) / (maxHt - minHt);
@@ -844,6 +865,46 @@
       }
     }
 
+    // 2b. Icing zones overlay (temp -20..+2°C AND cloud>50% or rh>80%)
+    for (var li = 0; li < nLevels; li++) {
+      for (var hi = 0; hi < nHours; hi++) {
+        var ic = grid[li][hi];
+        if (ic.temp == null || ic.cloud == null || ic.rh == null) continue;
+        if (ic.temp < -20 || ic.temp > 2) continue;
+        if (ic.cloud <= 50 && ic.rh <= 80) continue;
+        var yTop, yBot;
+        if (li === nLevels - 1) {
+          yTop = (li > 0) ? (levelY[li] + levelY[li - 1]) / 2 : topMargin;
+          yBot = levelY[li] + (levelY[li] - yTop);
+        } else if (li === 0) {
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+          yTop = levelY[li] - (yBot - levelY[li]);
+        } else {
+          yTop = (levelY[li] + levelY[li - 1]) / 2;
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+        }
+        yTop = Math.max(yTop, topMargin);
+        yBot = Math.min(yBot, topMargin + chartH);
+        var ix = hourX(hi), iw = cellW + 0.5, ih = yBot - yTop;
+        ctx.fillStyle = 'rgba(41,128,185,0.18)';
+        ctx.fillRect(ix, yTop, iw, ih);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ix, yTop, iw, ih);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(41,128,185,0.35)';
+        ctx.lineWidth = 0.8;
+        var spacing = 6;
+        for (var d = -ih; d < iw + ih; d += spacing) {
+          ctx.beginPath();
+          ctx.moveTo(ix + d, yTop);
+          ctx.lineTo(ix + d + ih, yBot);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+
     // 3. Draw freezing level line (0C isotherm)
     ctx.beginPath();
     ctx.setLineDash([4, 3]);
@@ -876,8 +937,8 @@
     // 4. Draw grid lines at FL label positions
     ctx.strokeStyle = 'rgba(0,0,0,0.12)';
     ctx.lineWidth = 0.5;
-    for (var fi = 0; fi < AIRGRAM_FL_LABELS.length; fi++) {
-      var gy = htToY(AIRGRAM_FL_LABELS[fi].ft * 0.3048);
+    for (var fi = 0; fi < flLabels.length; fi++) {
+      var gy = htToY(flLabels[fi].ft * 0.3048);
       ctx.beginPath();
       ctx.moveTo(leftMargin, gy);
       ctx.lineTo(leftMargin + chartW, gy);
@@ -910,12 +971,12 @@
     ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textBaseline = 'middle';
 
-    // Left: fixed FL labels
+    // Left: FL labels (airport elevation + FL025, FL050, ... FL200)
     ctx.textAlign = 'right';
     ctx.fillStyle = '#444';
-    for (var fi = 0; fi < AIRGRAM_FL_LABELS.length; fi++) {
-      var flY = htToY(AIRGRAM_FL_LABELS[fi].ft * 0.3048);
-      ctx.fillText(AIRGRAM_FL_LABELS[fi].label, leftMargin - 4, flY);
+    for (var fi = 0; fi < flLabels.length; fi++) {
+      var flY = htToY(flLabels[fi].ft * 0.3048);
+      ctx.fillText(flLabels[fi].label, leftMargin - 4, flY);
     }
 
     // Bottom: UTC hours
@@ -965,10 +1026,10 @@
       var cell = grid[bestLi][hi];
       var parts = [];
       var curFt = (minHt + (maxHt - minHt) * (1 - (my - topMargin) / chartH)) * 3.28084;
-      var bandLo = AIRGRAM_FL_LABELS[0].ft, bandHi = AIRGRAM_FL_LABELS[AIRGRAM_FL_LABELS.length - 1].ft;
-      for (var fi = 0; fi < AIRGRAM_FL_LABELS.length - 1; fi++) {
-        if (curFt >= AIRGRAM_FL_LABELS[fi].ft && curFt < AIRGRAM_FL_LABELS[fi + 1].ft) {
-          bandLo = AIRGRAM_FL_LABELS[fi].ft; bandHi = AIRGRAM_FL_LABELS[fi + 1].ft; break;
+      var bandLo = flLabels[0].ft, bandHi = flLabels[flLabels.length - 1].ft;
+      for (var fi = 0; fi < flLabels.length - 1; fi++) {
+        if (curFt >= flLabels[fi].ft && curFt < flLabels[fi + 1].ft) {
+          bandLo = flLabels[fi].ft; bandHi = flLabels[fi + 1].ft; break;
         }
       }
       function fmtFL(ft) { var v = Math.round(ft / 100); return 'FL' + (v < 100 ? (v < 10 ? '00' : '0') : '') + v; }
@@ -978,6 +1039,10 @@
       }
       if (cell.temp != null) parts.push(Math.round(cell.temp) + '\u00B0C');
       if (cell.cloud != null) parts.push(Math.round(cell.cloud) + '% cloud');
+      if (cell.temp != null && cell.cloud != null && cell.rh != null
+          && cell.temp >= -20 && cell.temp <= 2 && (cell.cloud > 50 || cell.rh > 80)) {
+        parts.push('\u2744 ICING');
+      }
       tip.textContent = parts.join('  ');
       tip.style.display = 'block';
       var cssMx = e.clientX - rect.left;
@@ -994,6 +1059,7 @@
     legend.className = 'airgram-legend';
     legend.innerHTML = '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:rgba(170,170,170,0.75);"></div>Cloud</div>'
       + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:#00e5ff;border-style:dashed;"></div>0\u00B0C</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch airgram-legend-icing"></div>Icing</div>'
       + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(-20) + ';opacity:0.5;"></div>-20\u00B0C</div>'
       + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(0) + ';opacity:0.5;"></div>0\u00B0C</div>'
       + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(20) + ';opacity:0.5;"></div>20\u00B0C</div>'
@@ -1004,7 +1070,7 @@
     el.appendChild(container);
   }
 
-  function fetchAirgramInto(el, lat, lon) {
+  function fetchAirgramInto(el, lat, lon, elevFt) {
     if (el._airgramLoaded) return;
     el._airgramLoaded = true;
     el.innerHTML = '<span class="metar-loading">Loading Airgram...</span>';
@@ -1016,7 +1082,7 @@
         return res.json();
       })
       .then(function (data) {
-        renderAirgram(el, data);
+        renderAirgram(el, data, elevFt);
       })
       .catch(function (err) {
         el.innerHTML = '<span class="info-unknown">Airgram unavailable</span>';
@@ -1059,12 +1125,13 @@
       var wdKey = 'wind_direction_' + lev + 'hPa';
       var ccKey = 'cloud_cover_' + lev + 'hPa';
       var ghKey = 'geopotential_height_' + lev + 'hPa';
+      var rhKey = 'relative_humidity_' + lev + 'hPa';
 
       for (var pi = 0; pi < nPoints; pi++) {
         var resp = responses[pi];
         var hourly = resp && resp.hourly;
         if (!hourly || !hourly.time) {
-          grid[li][pi] = { temp: null, windSpd: null, windDir: null, cloud: null, geoHt: null };
+          grid[li][pi] = { temp: null, windSpd: null, windDir: null, cloud: null, geoHt: null, rh: null };
           continue;
         }
 
@@ -1085,7 +1152,8 @@
           windSpd: hourly[wsKey] ? hourly[wsKey][hi] : null,
           windDir: hourly[wdKey] ? hourly[wdKey][hi] : null,
           cloud: hourly[ccKey] ? hourly[ccKey][hi] : null,
-          geoHt: hourly[ghKey] ? hourly[ghKey][hi] : null
+          geoHt: hourly[ghKey] ? hourly[ghKey][hi] : null,
+          rh: hourly[rhKey] ? hourly[rhKey][hi] : null
         };
       }
     }
@@ -1190,6 +1258,49 @@
         var alpha = (cc / 100) * 0.75;
         ctx.fillStyle = 'rgba(170,170,170,' + alpha.toFixed(2) + ')';
         ctx.fillRect(ptX(pi), yTop, cellW + 0.5, yBot - yTop);
+      }
+    }
+
+    // 2b. Icing zones overlay (temp -20..+2°C AND cloud>50% or rh>80%)
+    for (var li = 0; li < nLevels; li++) {
+      for (var pi = 0; pi < nPoints; pi++) {
+        var ic = grid[li][pi];
+        if (ic.temp == null || ic.cloud == null || ic.rh == null) continue;
+        if (ic.temp < -20 || ic.temp > 2) continue;
+        if (ic.cloud <= 50 && ic.rh <= 80) continue;
+        // Icing condition met — draw blue hatched zone
+        var yTop, yBot;
+        if (li === nLevels - 1) {
+          yTop = (li > 0) ? (levelY[li] + levelY[li - 1]) / 2 : topMargin;
+          yBot = levelY[li] + (levelY[li] - yTop);
+        } else if (li === 0) {
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+          yTop = levelY[li] - (yBot - levelY[li]);
+        } else {
+          yTop = (levelY[li] + levelY[li - 1]) / 2;
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+        }
+        yTop = Math.max(yTop, topMargin);
+        yBot = Math.min(yBot, topMargin + chartH);
+        var ix = ptX(pi), iw = cellW + 0.5, ih = yBot - yTop;
+        // Blue tint
+        ctx.fillStyle = 'rgba(41,128,185,0.18)';
+        ctx.fillRect(ix, yTop, iw, ih);
+        // Diagonal hatching
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ix, yTop, iw, ih);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(41,128,185,0.35)';
+        ctx.lineWidth = 0.8;
+        var spacing = 6;
+        for (var d = -ih; d < iw + ih; d += spacing) {
+          ctx.beginPath();
+          ctx.moveTo(ix + d, yTop);
+          ctx.lineTo(ix + d + ih, yBot);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
     }
 
@@ -1345,6 +1456,10 @@
       }
       if (cell.temp != null) parts.push(Math.round(cell.temp) + '\u00B0C');
       if (cell.cloud != null) parts.push(Math.round(cell.cloud) + '% cloud');
+      if (cell.temp != null && cell.cloud != null && cell.rh != null
+          && cell.temp >= -20 && cell.temp <= 2 && (cell.cloud > 50 || cell.rh > 80)) {
+        parts.push('\u2744 ICING');
+      }
       tip.textContent = parts.join('  ');
       tip.style.display = 'block';
       var cssMx = e.clientX - rect.left;
@@ -1361,6 +1476,7 @@
     legend.className = 'airgram-legend';
     legend.innerHTML = '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:rgba(170,170,170,0.75);"></div>Cloud</div>'
       + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:#00e5ff;border-style:dashed;"></div>0\u00B0C</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch airgram-legend-icing"></div>Icing</div>'
       + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(-20) + ';opacity:0.5;"></div>Cold</div>'
       + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(20) + ';opacity:0.5;"></div>Warm</div>';
     container.appendChild(legend);
@@ -1432,6 +1548,82 @@
       });
   }
 
+  // --- AI Weather Briefing stream reader ---
+  function streamBriefing(el, requestBody) {
+    el.innerHTML = '<div class="briefing-content"><span class="briefing-cursor"></span></div>';
+    var contentEl = el.querySelector('.briefing-content');
+    var cursor = el.querySelector('.briefing-cursor');
+    var buffer = '';
+
+    fetch(OWM_PROXY + '/briefing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    }).then(function (resp) {
+      if (!resp.ok) {
+        contentEl.textContent = 'Briefing unavailable (HTTP ' + resp.status + ')';
+        if (cursor) cursor.remove();
+        return;
+      }
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var partial = '';
+
+      function read() {
+        reader.read().then(function (result) {
+          if (result.done) {
+            if (cursor) cursor.remove();
+            // Convert markdown-style headings to styled HTML
+            formatBriefing(contentEl);
+            return;
+          }
+          partial += decoder.decode(result.value, { stream: true });
+          var lines = partial.split('\n');
+          partial = lines.pop(); // keep incomplete line
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.indexOf('data: ') !== 0) continue;
+            var payload = line.slice(6);
+            if (payload === '[DONE]') continue;
+            try {
+              var evt = JSON.parse(payload);
+              if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) {
+                buffer += evt.delta.text;
+                // Update display: insert text before cursor
+                if (cursor && cursor.parentNode) {
+                  cursor.parentNode.insertBefore(document.createTextNode(evt.delta.text), cursor);
+                } else {
+                  contentEl.appendChild(document.createTextNode(evt.delta.text));
+                }
+              }
+            } catch (e) { /* skip non-JSON lines */ }
+          }
+          read();
+        }).catch(function () {
+          if (cursor) cursor.remove();
+          if (!buffer) contentEl.textContent = 'Briefing stream error';
+        });
+      }
+      read();
+    }).catch(function () {
+      contentEl.textContent = 'Failed to connect to briefing service';
+      if (cursor) cursor.remove();
+    });
+  }
+
+  function formatBriefing(el) {
+    var text = el.textContent || '';
+    // Convert ## headings and basic markdown to HTML
+    var html = text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/^## (.+)$/gm, '<h4 class="briefing-heading">$1</h4>')
+      .replace(/^### (.+)$/gm, '<h5 class="briefing-subheading">$1</h5>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+    el.innerHTML = html;
+  }
+
   // Expose map and helpers for other modules
   window.AirportApp = window.AirportApp || {};
   window.AirportApp.map = map;
@@ -1440,6 +1632,8 @@
   window.AirportApp.fetchRouteAirgramInto = fetchRouteAirgramInto;
   window.AirportApp.fetchRouteAirgramData = fetchRouteAirgramData;
   window.AirportApp.AIRGRAM_LEVELS = AIRGRAM_LEVELS;
+  window.AirportApp.routeAirgramCache = routeAirgramCache;
+  window.AirportApp.streamBriefing = streamBriefing;
 
   // --- Settings persistence (localStorage) ---
   var STORAGE_KEY = 'airports-panel-settings';

@@ -35,6 +35,9 @@
   var TAF_API = OWM_PROXY + '/taf';
   var AR_METARTAF_API = OWM_PROXY + '/ar/metartaf/';
 
+  // Lentopaikat.fi ICAO → slug mapping (loaded at startup)
+  var lentopaikatMap = null;
+
   // Shared METAR cache: icao → parsed metar object
   var metarCache = {};
   // TAF cache: icao → taf json
@@ -415,9 +418,7 @@
     html += '<button class="popup-extra-tab" data-panel="popup-notam">NOTAMs</button>';
     html += '<button class="popup-extra-tab" data-panel="popup-charts">Charts</button>';
     html += '<button class="popup-extra-tab" data-panel="popup-airgram">Airgram</button>';
-    if (runways.length > 0) {
-      html += '<button class="popup-extra-tab" data-panel="popup-runways">Runways</button>';
-    }
+    html += '<button class="popup-extra-tab" data-panel="popup-briefing">Briefing</button>';
     html += '</div>';
 
     // --- Info tab (default open) ---
@@ -447,28 +448,10 @@
     html += parking ? '<span class="info-value">' + parking + '</span>' : '<span class="info-value info-unknown">No data</span>';
     html += '</div>';
     html += '</div>';
-    html += '<div class="popup-links">';
-    html += '<a class="popup-link aip-link" data-icao="' + escapeHtml(icaoRaw) + '" style="display:none" target="_blank" rel="noopener">AIP</a>';
-    html += '<a href="https://www.google.com/search?q=' + icaoEnc + '+airport" target="_blank" rel="noopener" class="popup-link google-link">Google</a>';
-    html += '<a href="https://skyvector.com/airport/' + icaoEnc + '" target="_blank" rel="noopener" class="popup-link sv-link">SkyVector</a>';
-    html += '<a href="https://ourairports.com/airports/' + icaoEnc + '/" target="_blank" rel="noopener" class="popup-link oa-link">OurAirports</a>';
-    html += '<a href="https://www.windy.com/' + lat + '/' + lon + '?detail=true" target="_blank" rel="noopener" class="popup-link windy-link">Windy</a>';
-    html += '</div>';
-    html += '</div>';
-
-    // --- TAF / Weather / NOTAMs / Charts / Airgram tabs ---
-    html += '<div class="popup-taf popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
-    html += '<div class="popup-weather popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" style="display:none;"></div>';
-    html += '<div class="popup-notam popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
-    html += '<div class="popup-charts popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
-    html += '<div class="popup-airgram popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" style="display:none;"></div>';
-
-    // --- Runways tab ---
     if (runways.length > 0) {
-      html += '<div class="popup-runways popup-extra-content" style="display:none;">';
       html += '<table class="runway-table" data-icao="' + escapeHtml(gpsCode || ident) + '"><thead><tr><th>RWY</th><th>Length</th><th>Width</th><th>Surface</th></tr></thead><tbody>';
-      for (var i = 0; i < runways.length; i++) {
-        var rwy = runways[i];
+      for (var ri = 0; ri < runways.length; ri++) {
+        var rwy = runways[ri];
         html += '<tr>';
         html += '<td>' + escapeHtml(rwy[RWY.designator]) + '</td>';
         html += '<td>' + ftToM(rwy[RWY.length]) + '</td>';
@@ -477,8 +460,26 @@
         html += '</tr>';
       }
       html += '</tbody></table>';
-      html += '</div>';
     }
+    html += '<div class="popup-links">';
+    html += '<a class="popup-link aip-link" data-icao="' + escapeHtml(icaoRaw) + '" style="display:none" target="_blank" rel="noopener">AIP</a>';
+    html += '<a href="https://www.google.com/search?q=' + icaoEnc + '+airport" target="_blank" rel="noopener" class="popup-link google-link">Google</a>';
+    html += '<a href="https://skyvector.com/airport/' + icaoEnc + '" target="_blank" rel="noopener" class="popup-link sv-link">SkyVector</a>';
+    html += '<a href="https://ourairports.com/airports/' + icaoEnc + '/" target="_blank" rel="noopener" class="popup-link oa-link">OurAirports</a>';
+    html += '<a href="https://www.windy.com/' + lat + '/' + lon + '?detail=true" target="_blank" rel="noopener" class="popup-link windy-link">Windy</a>';
+    if (lentopaikatMap && lentopaikatMap[icaoRaw]) {
+      html += '<a href="https://lentopaikat.fi/' + lentopaikatMap[icaoRaw] + '/" target="_blank" rel="noopener" class="popup-link lp-link">Lentopaikat</a>';
+    }
+    html += '</div>';
+    html += '</div>';
+
+    // --- TAF / Weather / NOTAMs / Charts / Airgram tabs ---
+    html += '<div class="popup-taf popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
+    html += '<div class="popup-weather popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" style="display:none;"></div>';
+    html += '<div class="popup-notam popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
+    html += '<div class="popup-charts popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
+    html += '<div class="popup-airgram popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" data-elev="' + (elevation || 0) + '" style="display:none;"></div>';
+    html += '<div class="popup-briefing popup-extra-content" data-icao="' + icaoSafe + '" data-name="' + escapeHtml(name) + '" data-elev="' + (elevation || 0) + '" style="display:none;"></div>';
 
     html += '</div>';
     return html;
@@ -594,32 +595,36 @@
     if (isIcingRisk(metar)) {
       html += ' <span class="ice-badge">' + ICE_SVG + '</span>';
     }
-    html += '<div class="metar-raw">' + escapeHtml(metar.rawOb) + '</div>';
 
-    // Decoded summary
-    var parts = [];
+    // Decoded summary as chips (before raw METAR)
+    var chips = [];
     if (metar.wdir != null && metar.wspd != null) {
-      var wind = (metar.wdir === 'VRB' ? 'VRB' : metar.wdir + '&deg;') + '/' + metar.wspd + 'kt';
-      if (metar.wgst) wind += ' G' + metar.wgst + 'kt';
-      parts.push('Wind: ' + wind);
+      var wind = (metar.wdir === 'VRB' ? 'VRB' : metar.wdir + '\u00B0') + '/' + metar.wspd + 'kt';
+      if (metar.wgst) wind += ' G' + metar.wgst;
+      chips.push('Wind ' + wind);
     }
     if (metar.visib != null) {
-      if (metar.visib >= 9999) parts.push('Vis: 10+ km');
-      else parts.push('Vis: ' + (metar.visib >= 1000 ? (metar.visib / 1000).toFixed(1) + ' km' : metar.visib + ' m'));
+      if (metar.visib >= 9999) chips.push('Vis 10+km');
+      else chips.push('Vis ' + (metar.visib >= 1000 ? (metar.visib / 1000).toFixed(1) + 'km' : metar.visib + 'm'));
     }
     if (metar.ceiling != null) {
-      parts.push('Ceil: ' + metar.ceiling + ' ft');
+      chips.push('Ceil ' + metar.ceiling + 'ft');
     } else if (metar.clouds && metar.clouds.length === 0) {
-      parts.push('Ceil: CLR');
+      chips.push('Ceil CLR');
     }
-    if (metar.wx && metar.wx.length > 0) parts.push('Wx: ' + metar.wx.join(' '));
-    if (metar.temp != null) parts.push('Temp: ' + metar.temp + '&deg;C');
-    if (metar.dewp != null) parts.push('Dew: ' + metar.dewp + '&deg;C');
-    if (metar.altim != null) parts.push('QNH: ' + metar.altim + ' hPa');
+    if (metar.wx && metar.wx.length > 0) chips.push(metar.wx.join(' '));
+    if (metar.temp != null) chips.push(metar.temp + '\u00B0C');
+    if (metar.dewp != null) chips.push('Dew ' + metar.dewp + '\u00B0C');
+    if (metar.altim != null) chips.push('QNH ' + metar.altim);
+    if (chips.length > 0) {
+      html += '<div class="wx-chips metar-chips">';
+      for (var ci = 0; ci < chips.length; ci++) {
+        html += '<span class="wx-chip">' + chips[ci] + '</span>';
+      }
+      html += '</div>';
+    }
 
-    if (parts.length > 0) {
-      html += '<div class="metar-decoded">' + parts.join(' &middot; ') + '</div>';
-    }
+    html += '<div class="metar-raw">' + escapeHtml(metar.rawOb) + '</div>';
     el.innerHTML = html;
 
     // Update runway wind components in the same popup
@@ -1048,7 +1053,8 @@
       return;
     }
 
-    var html = '<div class="notam-header">' + NOTAM_SVG + ' <strong>' + data.count + ' NOTAM' + (data.count > 1 ? 's' : '') + '</strong></div>';
+    var notamHdrClass = data.hasCritical ? 'notam-header notam-header-critical' : 'notam-header';
+    var html = '<div class="' + notamHdrClass + '">' + NOTAM_SVG + ' <strong>' + data.count + ' NOTAM' + (data.count > 1 ? 's' : '') + '</strong></div>';
     html += '<div class="notam-list">';
     for (var i = 0; i < data.notams.length; i++) {
       var n = data.notams[i];
@@ -1111,6 +1117,12 @@
         var m = markersByIcao[icao];
         if (m) {
           m.setIcon(createMarkerIcon(m._airportType, m._airportCode, null, zoom));
+          // Restore original tooltip
+          var row = m._airportData;
+          var tip = m._airportCode + ' ' + (row[COL.name] || '');
+          if (row[COL.municipality]) tip += ' \u00b7 ' + row[COL.municipality];
+          if (row[COL.elevation]) tip += ' \u00b7 ' + row[COL.elevation] + ' ft';
+          m.setTooltipContent(tip);
         }
       }
       updatedIcaos = [];
@@ -1215,6 +1227,18 @@
         if (!marker) continue;
         marker.setIcon(createMarkerIcon(marker._airportType, marker._airportCode, m.fltCat, map.getZoom()));
         updatedIcaos.push(m.icao);
+        // Update tooltip with METAR summary
+        var row = marker._airportData;
+        var tip = marker._airportCode + ' ' + (row[COL.name] || '');
+        if (row[COL.municipality]) tip += ' \u00b7 ' + row[COL.municipality];
+        tip += ' \u00b7 ' + (m.fltCat || '?');
+        if (m.wdir != null && m.wspd != null) {
+          tip += ' \u00b7 ' + (m.wdir === 'VRB' ? 'VRB' : m.wdir + '\u00b0') + '/' + m.wspd + 'kt';
+          if (m.wgst) tip += ' G' + m.wgst;
+        }
+        if (m.temp != null) tip += ' \u00b7 ' + m.temp + '\u00b0C';
+        if (isIcingRisk(m)) tip += ' \u00b7 \u2744 ICING';
+        marker.setTooltipContent(tip);
       }
       console.log('METAR: updated ' + results.length + ' airport markers');
       applyWxFilter();
@@ -1273,6 +1297,12 @@
 
     var map = app.map;
 
+    // Load lentopaikat.fi slug mapping (optional, non-blocking)
+    fetch('data/lentopaikat.json')
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (json) { if (json) lentopaikatMap = json; })
+      .catch(function () { /* optional data, ignore errors */ });
+
     fetch('data/airports-eu.json')
       .then(function (res) {
         if (!res.ok) throw new Error('Failed to load airports-eu.json: ' + res.status);
@@ -1288,6 +1318,9 @@
         });
 
         var markersByIcao = {};
+        var shortRwyMarkers = []; // markers for airports without qualifying runway
+        var rwyFilterActive = document.getElementById('rwy-filter-toggle');
+        var rwyFilterOn = rwyFilterActive ? rwyFilterActive.checked : true;
         var count = 0;
         for (var i = 0; i < data.length; i++) {
           var row = data[i];
@@ -1303,7 +1336,7 @@
           var runways = row[COL.runways] || [];
           if (runways.length === 0) continue;
 
-          // Filter: at least one runway >= 800m (2625ft) with asphalt/concrete
+          // Check: at least one runway >= 800m (2625ft) with asphalt/concrete
           var hasQualifyingRunway = runways.some(function (r) {
             var len = r[RWY.length];
             if (!len || len < 2625) return false;
@@ -1312,7 +1345,6 @@
               || s.indexOf('BIT') >= 0 || s.indexOf('PEM') >= 0
               || s.indexOf('ASPHALT') >= 0 || s.indexOf('CONCRETE') >= 0;
           });
-          if (!hasQualifyingRunway) continue;
 
           var code = getCode(row);
           var marker = L.marker([lat, lon], {
@@ -1335,8 +1367,16 @@
           marker._airportData = row;
           marker._airportType = type;
           marker._airportCode = code;
+          marker._shortRwy = !hasQualifyingRunway;
 
-          typeLayers[type].addLayer(marker);
+          if (!hasQualifyingRunway) {
+            shortRwyMarkers.push(marker);
+            if (!rwyFilterOn) {
+              typeLayers[type].addLayer(marker);
+            }
+          } else {
+            typeLayers[type].addLayer(marker);
+          }
           markersByIcao[code] = marker;
           count++;
         }
@@ -1377,6 +1417,23 @@
 
         updateLayerVisibility();
         map.on('zoomend', updateLayerVisibility);
+
+        // Runway filter toggle
+        if (rwyFilterActive) {
+          rwyFilterActive.addEventListener('change', function () {
+            rwyFilterOn = rwyFilterActive.checked;
+            for (var j = 0; j < shortRwyMarkers.length; j++) {
+              var sm = shortRwyMarkers[j];
+              var layer = typeLayers[sm._airportType];
+              if (!layer) continue;
+              if (rwyFilterOn) {
+                if (layer.hasLayer(sm)) layer.removeLayer(sm);
+              } else {
+                if (!layer.hasLayer(sm)) layer.addLayer(sm);
+              }
+            }
+          });
+        }
 
         if (app.layerControl) {
           Object.keys(TYPE_CONFIG).forEach(function (type) {
@@ -1496,11 +1553,55 @@
                   if (agDiv && window.AirportApp.fetchAirgramInto) {
                     var aLat = agDiv.getAttribute('data-lat');
                     var aLon = agDiv.getAttribute('data-lon');
-                    window.AirportApp.fetchAirgramInto(agDiv, aLat, aLon);
+                    var aElev = parseFloat(agDiv.getAttribute('data-elev')) || 0;
+                    window.AirportApp.fetchAirgramInto(agDiv, aLat, aLon, aElev);
                   }
-                } else if (target === 'popup-runways') {
-                  var popupContent = el.querySelector('.popup-content');
-                  if (popupContent && icao) renderRunwayWind(popupContent, icao);
+                } else if (target === 'popup-briefing') {
+                  var bDiv = el.querySelector('.popup-briefing');
+                  if (bDiv && window.AirportApp.streamBriefing) {
+                    var bIcao = bDiv.getAttribute('data-icao');
+                    var bName = bDiv.getAttribute('data-name');
+                    var bElev = bDiv.getAttribute('data-elev');
+
+                    function streamAirportBriefing() {
+                      var bMetar = metarCache[bIcao] ? metarCache[bIcao].rawOb : null;
+                      var bTaf = rawTafCache[bIcao] || null;
+                      if (!bTaf && tafCache[bIcao]) {
+                        bTaf = getRawTaf(tafCache[bIcao]);
+                      }
+                      var bNotams = [];
+                      if (notamCache[bIcao] && notamCache[bIcao].notams) {
+                        for (var ni = 0; ni < notamCache[bIcao].notams.length; ni++) {
+                          var nn = notamCache[bIcao].notams[ni];
+                          bNotams.push({ id: nn.id, text: nn.text });
+                        }
+                      }
+                      window.AirportApp.streamBriefing(bDiv, {
+                        type: 'airport',
+                        data: { icao: bIcao, name: bName, elevation: bElev, metar: bMetar, taf: bTaf, notams: bNotams }
+                      });
+                    }
+
+                    var hasData = (metarCache[bIcao] && metarCache[bIcao].rawOb) || rawTafCache[bIcao] || tafCache[bIcao];
+                    if (hasData) {
+                      streamAirportBriefing();
+                    } else {
+                      bDiv.innerHTML = '<span class="metar-loading">Loading weather data...</span>';
+                      fetch(AR_METARTAF_API + encodeURIComponent(bIcao))
+                        .then(function (res) { return res.ok ? res.json() : Promise.reject(); })
+                        .then(function (json) {
+                          if (json.metar) {
+                            var m = parseMetar(json.metar);
+                            if (m) { metarCache[bIcao] = m; metarCacheTime[bIcao] = Date.now(); }
+                          }
+                          if (json.taf) rawTafCache[bIcao] = json.taf;
+                          streamAirportBriefing();
+                        })
+                        .catch(function () {
+                          bDiv.innerHTML = '<div class="briefing-content">Could not load weather data for briefing.</div>';
+                        });
+                    }
+                  }
                 }
               }
             });
@@ -1512,7 +1613,8 @@
             var cachedNotam = notamCache[icao];
             if (cachedNotam && !isNotamStale(icao)) {
               if (cachedNotam.count > 0) {
-                nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + cachedNotam.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
+                var nwCls = cachedNotam.hasCritical ? 'notam-warning notam-warning-critical' : 'notam-warning';
+                nameEl.insertAdjacentHTML('beforeend', ' <span class="' + nwCls + '" title="' + cachedNotam.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
               }
             } else {
               fetchNotams(icao)
@@ -1521,7 +1623,8 @@
                   notamCache[icao] = data;
                   notamCacheTime[icao] = Date.now();
                   if (data.count > 0 && nameEl) {
-                    nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + data.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
+                    var nwCls = data.hasCritical ? 'notam-warning notam-warning-critical' : 'notam-warning';
+                    nameEl.insertAdjacentHTML('beforeend', ' <span class="' + nwCls + '" title="' + data.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
                   }
                 })
                 .catch(function () { /* silently skip */ });

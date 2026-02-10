@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>European Airports Map — User Manual</title>
+  <style>
+    /* Print-optimized + screen layout */
+    @page {
+      size: A4;
+      margin: 20mm 18mm 22mm 18mm;
+    }
+    @media print {
+      body { font-size: 10pt; }
+      .no-print { display: none !important; }
+      h1, h2, h3 { page-break-after: avoid; }
+      table, figure, .info-box { page-break-inside: avoid; }
+      .page-break { page-break-before: always; }
+      a { color: #333; text-decoration: none; }
+      a[href]::after { content: none; }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.55;
+      color: #222;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 30px 24px 60px;
+      background: #fff;
+    }
+    h1 {
+      font-size: 26px;
+      margin: 0 0 6px;
+      color: #1a1a1a;
+      border-bottom: 3px solid #2980b9;
+      padding-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #555;
+      margin-bottom: 28px;
+    }
+    h2 {
+      font-size: 19px;
+      color: #2c3e50;
+      margin: 32px 0 10px;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 4px;
+    }
+    h3 {
+      font-size: 15px;
+      color: #34495e;
+      margin: 18px 0 6px;
+    }
+    p, li { font-size: 13px; }
+    p { margin: 6px 0; }
+    ul, ol { margin: 6px 0 6px 20px; }
+    li { margin: 3px 0; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 8px 0 12px;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 5px 8px;
+      text-align: left;
+    }
+    th {
+      background: #f0f4f8;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+    tr:nth-child(even) { background: #fafbfc; }
+    code {
+      background: #f0f0f0;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-family: 'SF Mono', Menlo, Consolas, monospace;
+    }
+    .info-box {
+      background: #e8f4fd;
+      border-left: 4px solid #2980b9;
+      padding: 10px 14px;
+      margin: 10px 0;
+      border-radius: 2px;
+      font-size: 12px;
+    }
+    .warn-box {
+      background: #fef3e2;
+      border-left: 4px solid #e67e22;
+      padding: 10px 14px;
+      margin: 10px 0;
+      border-radius: 2px;
+      font-size: 12px;
+    }
+    .color-swatch {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      vertical-align: middle;
+      margin-right: 4px;
+      border: 1px solid #aaa;
+    }
+    .color-rect {
+      display: inline-block;
+      width: 26px;
+      height: 14px;
+      border-radius: 2px;
+      vertical-align: middle;
+      margin-right: 4px;
+      border: 1px solid #aaa;
+    }
+    .toc { margin: 16px 0 28px; }
+    .toc a { color: #2980b9; text-decoration: none; font-size: 13px; }
+    .toc a:hover { text-decoration: underline; }
+    .toc ol { counter-reset: toc-item; list-style: none; margin-left: 0; }
+    .toc > ol > li { counter-increment: toc-item; margin: 4px 0; }
+    .toc > ol > li::before { content: counter(toc-item) ". "; font-weight: 600; color: #2c3e50; }
+    figure { margin: 10px 0; text-align: center; }
+    figcaption { font-size: 11px; color: #666; margin-top: 4px; }
+    .barb-examples { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; margin: 8px 0; }
+    .barb-example { text-align: center; font-size: 11px; color: #555; }
+    .barb-example svg { display: block; margin: 0 auto 2px; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 28px 0; }
+  </style>
+</head>
+<body>
+
+<h1>European Airports Map</h1>
+<p class="subtitle">User Manual &mdash; DA62 Flight Planning Tool</p>
+
+<nav class="toc">
+  <ol>
+    <li><a href="#introduction">Introduction</a></li>
+    <li><a href="#map-layers">Map &amp; Layers</a></li>
+    <li><a href="#airport-markers">Airport Markers</a></li>
+    <li><a href="#airport-popup">Airport Popup</a></li>
+    <li><a href="#flight-categories">Flight Categories</a></li>
+    <li><a href="#metar-interpretation">METAR Interpretation</a></li>
+    <li><a href="#icing-detection">Icing Detection</a></li>
+    <li><a href="#notam-classification">NOTAM Classification</a></li>
+    <li><a href="#airgram-charts">Airgram Charts</a></li>
+    <li><a href="#route-planning">Route Planning</a></li>
+    <li><a href="#wind-adjusted">Wind-Adjusted Calculations</a></li>
+    <li><a href="#terrain-icing-warnings">Terrain &amp; Icing Warnings</a></li>
+    <li><a href="#route-weather">Route Weather Panel</a></li>
+    <li><a href="#weight-balance">Weight &amp; Balance</a></li>
+    <li><a href="#export-print">Export &amp; Print</a></li>
+    <li><a href="#wind-barb-symbology">Wind Barb Symbology</a></li>
+    <li><a href="#data-sources">Data Sources</a></li>
+    <li><a href="#reference-tables">Reference Tables</a></li>
+  </ol>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="introduction">1. Introduction</h2>
+
+<p>The European Airports Map is a browser-based flight planning tool built for VFR and IFR operations across Europe, with aircraft performance profiles tailored for the <strong>Diamond DA62</strong>. It runs as a Progressive Web App (PWA) and can be installed on desktop or mobile for offline-capable use.</p>
+
+<p>Key capabilities:</p>
+<ul>
+  <li>Interactive map with over 1,000 European airports (large, medium, small) filtered by paved runway &ge;800 m</li>
+  <li>Live METAR and TAF weather overlays with flight category color coding</li>
+  <li>Airport popups with ATC info, frequencies, charts (AIP), NOTAMs, airgram, and weather</li>
+  <li>Multi-leg route planning with fuel calculations, wind adjustments, and icing warnings</li>
+  <li>Weight &amp; Balance calculator with CG envelope visualization</li>
+  <li>Export to Garmin FPL, GPX, and printable flight plans</li>
+  <li>Weather tiles (wind, clouds, precipitation, pressure, temperature) and wind barbs overlay</li>
+  <li>AMA (Absolute Minimum Altitude) grid and obstacle markers</li>
+  <li>Significant Weather Chart (SWC) viewer</li>
+</ul>
+
+<div class="info-box">
+  <strong>Note:</strong> This tool is for planning assistance only. Always verify data against official sources (AIP, official MET reports, NOTAMs) before flight.
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="map-layers" class="page-break">2. Map &amp; Layers</h2>
+
+<h3>2.1 Basemaps</h3>
+<p>Six basemap styles are available via the layer control (top-right corner):</p>
+<table>
+  <tr><th>Basemap</th><th>Description</th><th>Best for</th></tr>
+  <tr><td>Light (default)</td><td>CARTO Light &mdash; clean, muted colors</td><td>General planning, day use</td></tr>
+  <tr><td>Dark</td><td>CARTO Dark &mdash; dark background</td><td>Night / low-light conditions</td></tr>
+  <tr><td>OpenStreetMap</td><td>Standard OSM tiles</td><td>Detailed road/feature reference</td></tr>
+  <tr><td>Topo</td><td>OpenTopoMap &mdash; contour lines, terrain shading</td><td>Terrain awareness</td></tr>
+  <tr><td>Satellite</td><td>Esri World Imagery</td><td>Visual identification, runway orientation</td></tr>
+  <tr><td>Stadia Smooth</td><td>Stadia Alidade Smooth &mdash; pastel tones</td><td>Aesthetic overview</td></tr>
+</table>
+
+<h3>2.2 Overlay Layers</h3>
+<p>Toggle these on/off via the layer control:</p>
+<table>
+  <tr><th>Overlay</th><th>Description</th></tr>
+  <tr><td>Country boundaries</td><td>GeoJSON borders with hover highlight</td></tr>
+  <tr><td>Large / Medium / Small airports</td><td>Airport markers by type (visibility depends on zoom level)</td></tr>
+  <tr><td>METAR weather</td><td>Color-codes airport markers by flight category (enabled by default)</td></tr>
+  <tr><td>AMA Grid</td><td>1&deg;&times;1&deg; cells showing Absolute Minimum Altitude (feet) with color-coded borders</td></tr>
+  <tr><td>Obstacles</td><td>Significant obstacles from AMA data (AGL &amp; AMSL heights)</td></tr>
+  <tr><td>Wind barbs</td><td>Surface wind barbs on a grid, auto-refreshing every 10 minutes</td></tr>
+</table>
+
+<h3>2.3 Weather Tile Layers</h3>
+<p>A separate radio-button layer control (below the main control) offers OpenWeatherMap tile overlays. Only one can be active at a time:</p>
+<ul>
+  <li><strong>Wind</strong> &mdash; color-coded surface wind speed</li>
+  <li><strong>Clouds</strong> &mdash; cloud cover opacity</li>
+  <li><strong>Precipitation</strong> &mdash; rain/snow intensity</li>
+  <li><strong>Pressure</strong> &mdash; sea-level pressure isobars</li>
+  <li><strong>Temperature</strong> &mdash; surface temperature gradient</li>
+</ul>
+
+<h3>2.4 SWC (Significant Weather Chart)</h3>
+<p>Click the <strong>SWC</strong> button (top-right) to open a floating panel showing the latest Significant Weather Chart for Scandinavia from <strong>ilmailusaa.fi</strong> (Finnish Aviation Weather). The valid time is displayed in the header, and a link to the original PDF is provided when available.</p>
+
+<h3>2.5 Weather Popup</h3>
+<p>Clicking anywhere on the map (when not in route mode) opens a weather popup showing:</p>
+<ul>
+  <li>Current conditions: temperature, feels-like, wind (knots), visibility, QNH</li>
+  <li>3-hourly forecast icons and temperatures for the next 18 hours</li>
+  <li>AI-generated weather overview text (OpenWeatherMap)</li>
+  <li>AMA value at that location (if available)</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="airport-markers" class="page-break">3. Airport Markers</h2>
+
+<h3>3.1 Airport Types &amp; Colors</h3>
+<table>
+  <tr><th>Type</th><th>Color</th><th>Dot Size</th><th>Min Zoom</th></tr>
+  <tr><td>Large airport</td><td><span class="color-swatch" style="background:#e74c3c"></span> Red</td><td>12 px</td><td>Always visible</td></tr>
+  <tr><td>Medium airport</td><td><span class="color-swatch" style="background:#3498db"></span> Blue</td><td>9 px</td><td>Zoom &ge; 6</td></tr>
+  <tr><td>Small airport</td><td><span class="color-swatch" style="background:#27ae60"></span> Green</td><td>6 px</td><td>Zoom &ge; 8</td></tr>
+</table>
+
+<h3>3.2 Filtering</h3>
+<p>Only airports with at least one <strong>paved runway &ge;800 m (2,625 ft)</strong> with asphalt, concrete, or bituminous surface are displayed. This filters out grass strips and very short runways unsuitable for the DA62.</p>
+
+<h3>3.3 Zoom Behavior</h3>
+<p>Marker dot sizes and ICAO label font sizes scale with zoom level. The scale factor is <code>1 + (zoom - 7) &times; 0.15</code> for zoom levels above 7. Airport type layers toggle visibility at their configured minimum zoom levels.</p>
+
+<h3>3.4 METAR Overlay Markers</h3>
+<p>When the METAR layer is active, airport dots are replaced by larger circles containing a letter indicating the flight category (V, M, B, I, L). The marker tooltip also updates to show wind, temperature, and icing status. METARs refresh every 5 minutes for airports in the current viewport, fetched in batches of 50.</p>
+
+<h3>3.5 Weather Filter</h3>
+<p>In the Legend panel, the <strong>"Hide IFR/LIFR airports"</strong> checkbox removes airports with IFR or LIFR conditions from the map when the METAR layer is active. This helps focus on airports with flyable weather.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="airport-popup" class="page-break">4. Airport Popup</h2>
+
+<p>Clicking an airport marker opens a detailed popup with tabbed content. The METAR is loaded immediately; other tabs load on first click.</p>
+
+<h3>4.1 Header</h3>
+<ul>
+  <li><strong>Airport name</strong> with NOTAM warning badge (if active NOTAMs exist)</li>
+  <li><strong>ICAO / IATA codes</strong></li>
+  <li><strong>Location:</strong> municipality, country, elevation (ft &amp; m)</li>
+  <li><strong>Current METAR:</strong> flight category badge, wind/icing icons, decoded chips, raw text</li>
+</ul>
+
+<h3>4.2 Tabs</h3>
+
+<table>
+  <tr><th>Tab</th><th>Contents</th></tr>
+  <tr>
+    <td><strong>Info</strong></td>
+    <td>ATC level (Approach/Tower, TWR, AFIS/Radio, CTAF/UNICOM, Uncontrolled), frequencies, estimated fuel availability, operating hours, parking. External links: AIP, Google, SkyVector, OurAirports, Windy.</td>
+  </tr>
+  <tr>
+    <td><strong>TAF</strong></td>
+    <td>12-hour TAF forecast as a timeline grid: hour labels (UTC), flight category badges, ceiling, visibility, wind icons, icing icons. Raw TAF text below.</td>
+  </tr>
+  <tr>
+    <td><strong>Weather</strong></td>
+    <td>OpenWeatherMap One Call 3.0 data: current conditions, 3-hourly forecast, AI overview text.</td>
+  </tr>
+  <tr>
+    <td><strong>NOTAMs</strong></td>
+    <td>Active NOTAMs with critical/normal classification. Critical NOTAMs highlighted in red.</td>
+  </tr>
+  <tr>
+    <td><strong>Charts</strong></td>
+    <td>AIP charts from the Autorouter database, organized by section: Airport, Departure, Arrival, Approach, VFR. Click to open PDF in new tab.</td>
+  </tr>
+  <tr>
+    <td><strong>Airgram</strong></td>
+    <td>24-hour vertical atmospheric profile (FL000&ndash;FL200). See <a href="#airgram-charts">Section 9</a>.</td>
+  </tr>
+  <tr>
+    <td><strong>Runways</strong></td>
+    <td>Runway table with designators, dimensions, surface type. When METAR is available, adds headwind/tailwind and crosswind components with best/worst runway indication.</td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="flight-categories">5. Flight Categories</h2>
+
+<p>Flight categories are determined from ceiling (lowest BKN, OVC, or VV layer) and visibility:</p>
+
+<table>
+  <tr><th>Category</th><th>Color</th><th>Letter</th><th>Ceiling</th><th>Visibility</th></tr>
+  <tr><td>VFR</td><td><span class="color-swatch" style="background:#27ae60"></span> Green</td><td>V</td><td>&gt; 3,000 ft</td><td><strong>AND</strong> &gt; 8 km</td></tr>
+  <tr><td>MVFR</td><td><span class="color-swatch" style="background:#3498db"></span> Blue</td><td>M</td><td>1,000&ndash;3,000 ft</td><td><strong>OR</strong> 5&ndash;8 km</td></tr>
+  <tr><td>BIR</td><td><span class="color-swatch" style="background:#e67e22"></span> Orange</td><td>B</td><td>600&ndash;999 ft</td><td><strong>OR</strong> 1.5&ndash;5 km</td></tr>
+  <tr><td>IFR</td><td><span class="color-swatch" style="background:#e74c3c"></span> Red</td><td>I</td><td>500&ndash;599 ft</td><td>(ceiling-only trigger)</td></tr>
+  <tr><td>LIFR</td><td><span class="color-swatch" style="background:#9b59b6"></span> Purple</td><td>L</td><td>&lt; 500 ft</td><td><strong>OR</strong> &lt; 1.5 km</td></tr>
+</table>
+
+<div class="info-box">
+  <strong>BIR (Below IFR)</strong> is an additional category between MVFR and IFR used in this application to provide finer granularity for approach minima evaluation in European airspace.
+</div>
+
+<p>The classification uses the <em>worst-case</em> rule: if either ceiling or visibility meets a lower category threshold, the lower category applies. IFR is effectively a ceiling-only category (500&ndash;599 ft) because the BIR category absorbs the 1.5&ndash;5 km visibility range, and visibility below 1.5 km triggers LIFR directly. When no ceiling exists (clear skies or only FEW/SCT layers), ceiling defaults to unlimited. CAVOK sets visibility to 10+ km.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="metar-interpretation" class="page-break">6. METAR Interpretation</h2>
+
+<h3>6.1 Decoded Chips</h3>
+<p>Below the flight category badge, the METAR is decoded into compact chips:</p>
+<table>
+  <tr><th>Chip</th><th>Format</th><th>Example</th></tr>
+  <tr><td>Wind</td><td>DDD&deg;/SSkt [Gnn]</td><td>Wind 240&deg;/12kt G18</td></tr>
+  <tr><td>Visibility</td><td>Vis N.Nkm or Nm</td><td>Vis 6.0km</td></tr>
+  <tr><td>Ceiling</td><td>Ceil NNNNft or CLR</td><td>Ceil 1200ft</td></tr>
+  <tr><td>Weather</td><td>METAR wx codes</td><td>-RA BR</td></tr>
+  <tr><td>Temperature</td><td>NN&deg;C</td><td>8&deg;C</td></tr>
+  <tr><td>Dewpoint</td><td>Dew NN&deg;C</td><td>Dew 5&deg;C</td></tr>
+  <tr><td>QNH</td><td>QNH NNNN</td><td>QNH 1013</td></tr>
+</table>
+
+<h3>6.2 Wind &amp; Icing Badges</h3>
+<ul>
+  <li><strong>Wind badge</strong> (flowing lines icon): appears when wind speed &gt; 15 kt or gusts &gt; 20 kt</li>
+  <li><strong>Ice badge</strong> (crystal icon): appears when icing conditions are detected (see <a href="#icing-detection">Section 7</a>)</li>
+</ul>
+
+<h3>6.3 Runway Wind Analysis</h3>
+<p>When METAR data is available and the Runways tab is opened, the runway table is enhanced with wind component analysis for each runway end:</p>
+<ul>
+  <li><strong>Head/Tail</strong>: headwind or tailwind component in knots</li>
+  <li><strong>Xwind</strong>: crosswind component with direction (L/R) and gust crosswind if applicable</li>
+  <li><strong>BEST</strong> badge: runway end with the strongest headwind</li>
+  <li><strong>WORST</strong> badge: runway end with the strongest tailwind (when more than 2 ends exist)</li>
+  <li>Crosswind coloring: caution (yellow) &gt; 10 kt, warning (red) &gt; 15 kt</li>
+</ul>
+
+<h3>6.4 Visibility Parsing</h3>
+<p>European METARs report visibility in meters (e.g. <code>9999</code> = 10+ km, <code>4500</code> = 4.5 km). US-format statute miles (e.g. <code>3SM</code>, <code>1/2SM</code>) are converted to meters internally (1 SM = 1609.34 m). <code>CAVOK</code> is treated as 10,000+ m visibility with no significant clouds.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="icing-detection" class="page-break">7. Icing Detection</h2>
+
+<p>The application detects icing risk at three levels: METAR-based (ground), TAF-based (forecast), and Open-Meteo pressure-level data (altitude). Each uses slightly different criteria.</p>
+
+<h3>7.1 METAR-Based Icing</h3>
+<p>Triggers the ice crystal badge on airport markers and in route waypoint weather:</p>
+
+<table>
+  <tr><th>Condition</th><th>Criteria</th><th>Always triggers?</th></tr>
+  <tr><td>Freezing precipitation</td><td>Any weather code containing <code>FZ</code> (FZRA, FZDZ, etc.)</td><td>Yes &mdash; regardless of temperature</td></tr>
+  <tr><td>Precipitation in icing range</td><td>Temperature &minus;20&deg;C to +2&deg;C <strong>AND</strong> any precipitation (RA, SN, DZ, PL, SG, GR, GS)</td><td>No &mdash; requires temp range</td></tr>
+  <tr><td>Visible moisture</td><td>Temperature &minus;20&deg;C to +2&deg;C <strong>AND</strong> ceiling &le; 5,000 ft <strong>AND</strong> temp/dewpoint spread &le; 3&deg;C</td><td>No &mdash; requires all three</td></tr>
+</table>
+
+<div class="info-box">
+  The &minus;20&deg;C to +2&deg;C range captures the structural icing envelope. Below &minus;20&deg;C, supercooled droplets are rare. The +2&deg;C upper bound allows for temperature uncertainty and descent into colder air.
+</div>
+
+<h3>7.2 TAF-Based Icing</h3>
+<p>Applied in the TAF hourly timeline (ICE row) and route weather badges. Uses current METAR temperature as a proxy since TAF does not include temperature:</p>
+
+<table>
+  <tr><th>Condition</th><th>Criteria</th></tr>
+  <tr><td>Freezing precipitation</td><td>TAF weather string contains <code>FZ</code></td></tr>
+  <tr><td>Precipitation + icing temp</td><td>METAR temp &minus;20&deg;C to +2&deg;C <strong>AND</strong> TAF wx contains RA/SN/DZ/PL/SG/GR/GS</td></tr>
+  <tr><td>Visible moisture</td><td>METAR temp &minus;20&deg;C to +2&deg;C <strong>AND</strong> TAF ceiling &le; 5,000 ft <strong>AND</strong> METAR temp/dewpoint spread &le; 3&deg;C</td></tr>
+  <tr><td>No weather string</td><td>METAR temp &minus;20&deg;C to +2&deg;C <strong>AND</strong> TAF ceiling &le; 5,000 ft <strong>AND</strong> METAR temp/dewpoint spread &le; 3&deg;C</td></tr>
+</table>
+
+<h3>7.3 Forecast-Based Icing (Open-Meteo Pressure Levels)</h3>
+<p>Used in the airgram chart hatching and route icing warnings. This checks conditions at specific pressure altitude levels (1000, 925, 850, 775, 700, 600, 500, 450 hPa):</p>
+
+<table>
+  <tr><th>Parameter</th><th>Threshold</th></tr>
+  <tr><td>Temperature</td><td>&minus;20&deg;C to +2&deg;C</td></tr>
+  <tr><td>Cloud cover <strong>OR</strong> Relative humidity</td><td>Cloud &gt; 50% <strong>OR</strong> RH &gt; 80%</td></tr>
+</table>
+
+<p>All three conditions (temperature in range + moisture indicator) must be met simultaneously. This data is interpolated to the selected flight level for route icing warnings.</p>
+
+<h3>7.4 Route Icing Warnings</h3>
+<p>The route planner checks icing in three phases:</p>
+<ol>
+  <li><strong>Climb (departure):</strong> checks all pressure levels between airport elevation and cruise FL at the departure point</li>
+  <li><strong>En-route (cruise):</strong> checks conditions at cruise FL along all sample points on the route</li>
+  <li><strong>Descent (arrival):</strong> checks all pressure levels between cruise FL and destination elevation at the arrival point</li>
+</ol>
+<p>The warning shows affected segments with FL ranges and percentage of route affected.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="notam-classification" class="page-break">8. NOTAM Classification</h2>
+
+<h3>8.1 Critical vs Normal</h3>
+<p>NOTAMs are automatically classified as <strong>critical</strong> if their text matches these patterns:</p>
+<ul>
+  <li><code>CLSD</code> or <code>CLOSED</code> &mdash; airport or runway closure</li>
+  <li><code>RESTRICTED</code> &mdash; restricted operations</li>
+  <li><code>PROHIBITED</code> &mdash; prohibited area or operations</li>
+  <li><code>DANGER</code> &mdash; danger area active</li>
+  <li><code>ILS/VOR/NDB/DME/LOC/GP</code> followed by <code>U/S</code> &mdash; navaid unserviceable</li>
+</ul>
+
+<h3>8.2 Display</h3>
+<ul>
+  <li><strong>Airport popup header:</strong> NOTAM count badge appears next to the airport name. Red if critical NOTAMs exist, amber otherwise.</li>
+  <li><strong>NOTAMs tab:</strong> full list with each NOTAM's ID and text. Critical NOTAMs have a red left border and are visually highlighted.</li>
+  <li><strong>Route planner:</strong> NOTAM badge (N) appears next to waypoint flight category badge. Red for critical, amber for normal.</li>
+</ul>
+
+<h3>8.3 Cache</h3>
+<p>NOTAMs are cached for 30 minutes per airport. They are fetched in the background when an airport popup opens and when airports are added to a route.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="airgram-charts" class="page-break">9. Airgram Charts</h2>
+
+<p>The airgram is a 24-hour vertical cross-section showing atmospheric conditions from the surface to FL200 (20,000 ft / 6,096 m). It is available in the airport popup Airgram tab and in the Route Weather panel.</p>
+
+<h3>9.1 Visual Elements</h3>
+
+<table>
+  <tr><th>Element</th><th>Visualization</th><th>Description</th></tr>
+  <tr>
+    <td>Temperature</td>
+    <td>Background color gradient</td>
+    <td>
+      <span class="color-rect" style="background:rgb(30,30,180)"></span>&le;&minus;40&deg;C (deep blue) &rarr;
+      <span class="color-rect" style="background:rgb(30,220,220)"></span>&minus;10&deg;C (cyan) &rarr;
+      <span class="color-rect" style="background:rgb(50,180,80)"></span>+5&deg;C (green) &rarr;
+      <span class="color-rect" style="background:rgb(230,220,40)"></span>+20&deg;C (yellow) &rarr;
+      <span class="color-rect" style="background:rgb(255,50,30)"></span>&ge;+35&deg;C (red)
+    </td>
+  </tr>
+  <tr>
+    <td>Cloud cover</td>
+    <td>Semi-transparent grey overlay</td>
+    <td>Opacity proportional to cloud coverage (0&ndash;75% alpha). Only shown when cloud &gt; 5%.</td>
+  </tr>
+  <tr>
+    <td>Icing zones</td>
+    <td>Blue-tinted area with diagonal hatching</td>
+    <td>Where temperature is &minus;20&deg;C to +2&deg;C <strong>AND</strong> (cloud &gt; 50% <strong>OR</strong> RH &gt; 80%)</td>
+  </tr>
+  <tr>
+    <td>Freezing level</td>
+    <td>Dashed cyan line</td>
+    <td>0&deg;C isotherm &mdash; altitude where temperature crosses freezing</td>
+  </tr>
+  <tr>
+    <td>Wind barbs</td>
+    <td>White mini barbs at grid points</td>
+    <td>Drawn every 2 hours at each pressure level. See <a href="#wind-barb-symbology">Section 16</a> for symbology.</td>
+  </tr>
+  <tr>
+    <td>Grid</td>
+    <td>Thin grey lines</td>
+    <td>Horizontal at FL labels (FL000&ndash;FL200 every 2,500 ft), vertical every 3 hours</td>
+  </tr>
+</table>
+
+<h3>9.2 Y-Axis</h3>
+<p>The Y-axis uses geopotential heights from the forecast data, proportionally spaced. The fixed FL labels (FL000, FL025, FL050, &hellip; FL200) are positioned based on standard-atmosphere meter equivalents.</p>
+
+<h3>9.3 Pressure Levels</h3>
+<p>Data is fetched for 8 pressure levels: 1000, 925, 850, 775, 700, 600, 500, 450 hPa, corresponding roughly to FL000, FL025, FL050, FL075, FL100, FL140, FL185, FL210 in standard atmosphere.</p>
+
+<h3>9.4 Tooltip</h3>
+<p>Hovering over the chart shows a tooltip with the exact values at the cursor position: time (UTC), flight level, temperature, wind speed &amp; direction, cloud cover, and relative humidity.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="route-planning" class="page-break">10. Route Planning</h2>
+
+<h3>10.1 Starting a Route</h3>
+<ol>
+  <li>Open the <strong>DA62 panel</strong> (aircraft icon, right side) and select the <strong>Route</strong> tab.</li>
+  <li>Click <strong>Start Route</strong> to enter route mode.</li>
+  <li>Click airports on the map to add them as waypoints. You can also click on open map areas to add custom coordinate waypoints (these are reverse-geocoded to place names).</li>
+</ol>
+
+<h3>10.2 Route Settings</h3>
+<table>
+  <tr><th>Setting</th><th>Description</th><th>Default</th></tr>
+  <tr><td>Fuel (US gal)</td><td>Usable fuel loaded</td><td>86 gal (DA62 max)</td></tr>
+  <tr><td>Power setting</td><td>Engine power / TAS / fuel burn profile</td><td>65% &mdash; 163 kts, 12.0 gal/hr</td></tr>
+  <tr><td>Dep UTC</td><td>Planned departure time (HH:MM UTC)</td><td>&mdash;</td></tr>
+  <tr><td>FL</td><td>Planned flight level (FL10&ndash;FL250)</td><td>FL080</td></tr>
+  <tr><td>Wx checkbox</td><td>Show wind barbs along route on map</td><td>Checked</td></tr>
+</table>
+
+<h3>10.3 DA62 Performance Profiles</h3>
+<table>
+  <tr><th>Power</th><th>TAS (kts)</th><th>Fuel Burn (gal/hr)</th></tr>
+  <tr><td>45%</td><td>140</td><td>8.4</td></tr>
+  <tr><td>55%</td><td>152</td><td>10.0</td></tr>
+  <tr><td>65%</td><td>163</td><td>12.0</td></tr>
+  <tr><td>75%</td><td>172</td><td>14.0</td></tr>
+  <tr><td>85%</td><td>183</td><td>16.5</td></tr>
+  <tr><td>95%</td><td>195</td><td>18.8</td></tr>
+</table>
+
+<h3>10.4 Waypoint Management</h3>
+<ul>
+  <li><strong>Add:</strong> click airports or map locations while in route mode</li>
+  <li><strong>Remove:</strong> click the &times; button next to any waypoint</li>
+  <li><strong>Reorder:</strong> not supported &mdash; use undo and re-add</li>
+  <li><strong>Drag:</strong> custom (non-airport) waypoints can be dragged on the map</li>
+  <li><strong>Undo Last:</strong> removes the most recently added waypoint</li>
+  <li><strong>Clear Route:</strong> removes all waypoints</li>
+  <li><strong>Click waypoint code</strong> in the panel to pan the map to that airport and open its popup</li>
+</ul>
+
+<h3>10.5 Alternate Airport</h3>
+<p>When 3+ waypoints exist, the last waypoint shows an <strong>ALT</strong> toggle button. Activating it marks that waypoint as the alternate destination:</p>
+<ul>
+  <li>The leg to the alternate is drawn with an orange dashed line</li>
+  <li>Fuel totals split into Trip, Alternate, and Reserve sections</li>
+  <li>Required fuel = Trip fuel + Alternate fuel + Reserve fuel (45-min IFR reserve at selected power)</li>
+  <li>Fuel deficit warning if loaded fuel is insufficient</li>
+</ul>
+
+<h3>10.6 Waypoint Weather Badges</h3>
+<p>When departure time is set, each waypoint shows a flight category badge based on TAF data at the estimated arrival time. The system checks &plusmn;1 hour around the arrival and uses the worst case. Departure airport uses live METAR instead. Wind and icing badges also appear when applicable.</p>
+
+<h3>10.7 Auto Route (IFR)</h3>
+<p>The <strong>Auto Route (IFR)</strong> button uses the Autorouter API to find an optimal IFR route between the first and last waypoints. It supports fuel and time optimization modes (toggles on repeated clicks) and populates the route with IFR waypoints (intersections, navaids).</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="wind-adjusted" class="page-break">11. Wind-Adjusted Calculations</h2>
+
+<p>When a departure time and FL are set, the app fetches pressure-level wind data from Open-Meteo along the route and computes wind-adjusted time and fuel.</p>
+
+<h3>11.1 How It Works</h3>
+<ol>
+  <li><strong>Sample points:</strong> 8&ndash;16 points are distributed evenly along the route by distance.</li>
+  <li><strong>Pressure-level data:</strong> For each point, Open-Meteo forecast data at 8 pressure levels is fetched (with the closest forecast hour to the estimated time of arrival at that point).</li>
+  <li><strong>Wind interpolation:</strong> Wind speed and direction at the selected FL are interpolated between adjacent pressure levels using geopotential heights.</li>
+  <li><strong>Headwind/tailwind decomposition:</strong> The wind vector is projected onto the track bearing for each leg. The average headwind component across all sample points on each leg is computed.</li>
+  <li><strong>Ground speed:</strong> <code>GS = max(50, TAS &minus; headwind)</code> (clamped to minimum 50 kt for safety).</li>
+  <li><strong>Adjusted calculations:</strong> <code>time = dist / GS</code>, <code>fuel = time &times; burn rate</code>.</li>
+</ol>
+
+<h3>11.2 Display</h3>
+<p>The "Wind adj" line in route totals shows:</p>
+<ul>
+  <li>Wind-adjusted total time and fuel</li>
+  <li>Average wind speed along the route</li>
+  <li>Average headwind or tailwind component</li>
+  <li>Time difference vs. no-wind calculation (e.g., +5min or &minus;3min)</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="terrain-icing-warnings">12. Terrain &amp; Icing Warnings</h2>
+
+<h3>12.1 AMA Terrain Warnings</h3>
+<p>The route planner checks the Absolute Minimum Altitude (AMA) along each leg by sampling every ~10 nm. If the selected FL is below the maximum AMA value on any leg, a warning is displayed:</p>
+<div class="warn-box">
+  &#9888; FL080 is below terrain:<br>
+  EFHK &rarr; ESSA: AMA 9800 ft
+</div>
+
+<h3>12.2 Route Icing Warnings</h3>
+<p>Using Open-Meteo pressure-level data, the app checks for icing conditions in three phases (see <a href="#icing-detection">Section 7.4</a>). When icing is detected, a snowflake warning appears:</p>
+<div class="warn-box">
+  &#10052; Icing conditions: EFHK FL020&ndash;FL060 (climb), FL080 &ndash; ~40% of route, ESSA FL030&ndash;FL070 (descent)
+</div>
+
+<h3>12.3 On-Map Route Weather</h3>
+<p>When the Wx checkbox is enabled, wind barbs are displayed along the route (offset to the right of the track). Each barb shows:</p>
+<ul>
+  <li>Wind speed and direction at the selected FL</li>
+  <li>Cloud cover circle (standard meteorological fill: clear/few/scattered/broken/overcast)</li>
+  <li>Blue ice crystal icon when icing conditions are detected at that point</li>
+  <li>Tooltip with FL, wind, cloud coverage, temperature, and icing status</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="route-weather" class="page-break">13. Route Weather Panel</h2>
+
+<p>Click the <strong>Weather</strong> button in route totals to open the floating Route Weather panel. It has three tabs:</p>
+
+<h3>13.1 Airgram Tab</h3>
+<p>A cross-section airgram along the entire route (surface to FL200), similar to a GRAMET but computed from Open-Meteo pressure-level data. The X-axis represents distance along the route with waypoint labels, and the Y-axis shows altitude. Visual elements match the airport airgram (temperature colors, cloud shading, icing hatching, freezing level, wind barbs).</p>
+
+<h3>13.2 GRAMET Tab</h3>
+<p>An official GRAMET cross-section image fetched from the Autorouter API. Shows the route weather cross-section including turbulence, icing, and cloud layers as computed by aviation weather services. Requires departure time and at least 2 waypoints. Click the image to open it in a new tab at full resolution.</p>
+
+<h3>13.3 FL Compare Tab</h3>
+<p>Compares wind conditions (headwind/tailwind, ground speed, time, fuel) across multiple flight levels for the current route. Helps select the optimal FL considering wind efficiency.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="weight-balance" class="page-break">14. Weight &amp; Balance</h2>
+
+<p>The W&amp;B tab in the DA62 panel computes takeoff weight and center of gravity using DA62 POH data.</p>
+
+<h3>14.1 Input Stations</h3>
+<table>
+  <tr><th>Station</th><th>Arm (m)</th><th>Max (kg)</th><th>Notes</th></tr>
+  <tr><td>Empty weight</td><td>User-entered CG</td><td>&mdash;</td><td>Default: 1,687 kg at 2.374 m</td></tr>
+  <tr><td>TKS fluid</td><td>0.899</td><td>27</td><td>De-icing fluid weight</td></tr>
+  <tr><td>Front L/R</td><td>2.301</td><td>220 combined</td><td>Front seat occupants</td></tr>
+  <tr><td>Rear L/R</td><td>3.251</td><td>220 combined</td><td>Rear seat occupants</td></tr>
+  <tr><td>Nose RH</td><td>0.051</td><td>30</td><td>Right-side nose compartment</td></tr>
+  <tr><td>Nose LH</td><td>0.470</td><td>30</td><td>Left-side nose compartment</td></tr>
+  <tr><td>Tail A</td><td>4.060</td><td>6</td><td>Tail baggage A</td></tr>
+  <tr><td>Tail B</td><td>4.178</td><td>6</td><td>Tail baggage B</td></tr>
+  <tr><td>Tail C</td><td>4.178</td><td>68</td><td>Tail baggage C (main)</td></tr>
+  <tr><td>Tail D</td><td>4.424</td><td>40</td><td>Tail baggage D (aft)</td></tr>
+  <tr><td>Fuel Main</td><td>2.629</td><td>159 kg</td><td>Auto-calculated from fuel input</td></tr>
+  <tr><td>Fuel Aux</td><td>3.200</td><td>116 kg</td><td>Overflow from main tanks</td></tr>
+</table>
+
+<p>Fuel weight uses JET A-1 density of <strong>3.043 kg per US gallon</strong>. The fuel gal input from the Range tab is shared with W&amp;B. Main tanks fill first (up to 159 kg), then auxiliary.</p>
+
+<h3>14.2 Weight Limits</h3>
+<table>
+  <tr><th>Limit</th><th>Value</th></tr>
+  <tr><td>Maximum Ramp Weight</td><td>2,308 kg</td></tr>
+  <tr><td>Maximum Takeoff Weight (MTOW)</td><td>2,300 kg</td></tr>
+  <tr><td>Maximum Landing Weight</td><td>2,300 kg</td></tr>
+  <tr><td>Maximum Zero Fuel Weight (ZFW)</td><td>2,200 kg</td></tr>
+</table>
+
+<h3>14.3 CG Envelope</h3>
+<p>The CG envelope is defined by forward and aft limit lines from the DA62 POH:</p>
+<table>
+  <tr><th>Boundary</th><th>Weight (kg)</th><th>CG (m)</th></tr>
+  <tr><td rowspan="3">Forward</td><td>1,600</td><td>2.340</td></tr>
+  <tr><td>1,800</td><td>2.340</td></tr>
+  <tr><td>2,300</td><td>2.460</td></tr>
+  <tr><td rowspan="4">Aft</td><td>1,600</td><td>2.460</td></tr>
+  <tr><td>1,900</td><td>2.510</td></tr>
+  <tr><td>1,999</td><td>2.510</td></tr>
+  <tr><td>2,300</td><td>2.530</td></tr>
+</table>
+
+<h3>14.4 Results Display</h3>
+<p>The calculator shows:</p>
+<ul>
+  <li><strong>ZFW</strong>: zero fuel weight and CG with pass/fail indicator</li>
+  <li><strong>Ramp</strong>: ramp weight and CG with pass/fail indicator</li>
+  <li><strong>Warning messages</strong>: specific limit exceedances (weight or CG out of envelope)</li>
+  <li><strong>SVG envelope chart</strong>: graphical plot with ZFW point (blue) and Ramp point (green/red) plotted on the CG envelope. Points outside the envelope are shown in red.</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="export-print" class="page-break">15. Export &amp; Print</h2>
+
+<h3>15.1 Export FPL (Garmin)</h3>
+<p>Generates a Garmin-compatible <code>.fpl</code> file (XML format) containing:</p>
+<ul>
+  <li>Waypoint table with identifiers, types (AIRPORT, INT, USER WAYPOINT), coordinates, elevations</li>
+  <li>Route definition with waypoint references</li>
+  <li>Country codes derived from ICAO prefixes</li>
+</ul>
+<p>The file downloads automatically with a name like <code>EFHK-ESSA.fpl</code>. Load it into a Garmin GPS or flight planning software.</p>
+
+<h3>15.2 Export GPX</h3>
+<p>Generates a standard <code>.gpx</code> file with waypoints (including elevations in meters) and a route track. Compatible with most GPS devices and mapping applications.</p>
+
+<h3>15.3 Print Flight Plan</h3>
+<p>The Print button generates a printable flight plan page with:</p>
+<ul>
+  <li>Route summary with waypoints, legs (distance, heading, time, fuel)</li>
+  <li>Weather conditions at each waypoint</li>
+  <li>Fuel totals, reserve calculations, terrain warnings</li>
+  <li>Route map screenshot</li>
+</ul>
+
+<h3>15.4 Settings Save/Load</h3>
+<p>The DA62 panel header includes download (&#x2B07;) and upload (&#x2B06;) buttons to save and restore all settings (fuel, power, W&amp;B inputs) as a JSON file.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="wind-barb-symbology" class="page-break">16. Wind Barb Symbology</h2>
+
+<p>Wind barbs follow standard meteorological conventions. The staff points into the wind direction (barbs on the upwind end):</p>
+
+<div class="barb-examples">
+  <div class="barb-example">
+    <svg viewBox="0 0 40 40" width="40" height="40">
+      <circle cx="20" cy="20" r="6" fill="none" stroke="#333" stroke-width="2"/>
+      <circle cx="20" cy="20" r="2" fill="#333"/>
+    </svg>
+    Calm<br>(&lt;3 kt)
+  </div>
+  <div class="barb-example">
+    <svg viewBox="0 0 40 40" width="40" height="40">
+      <line x1="20" y1="4" x2="20" y2="36" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="20" cy="36" r="2.5" fill="#333"/>
+      <line x1="20" y1="4" x2="26" y2="2" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    5 kt<br>(half barb)
+  </div>
+  <div class="barb-example">
+    <svg viewBox="0 0 40 40" width="40" height="40">
+      <line x1="20" y1="4" x2="20" y2="36" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="20" cy="36" r="2.5" fill="#333"/>
+      <line x1="20" y1="4" x2="32" y2="1" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    10 kt<br>(full barb)
+  </div>
+  <div class="barb-example">
+    <svg viewBox="0 0 40 40" width="40" height="40">
+      <line x1="20" y1="4" x2="20" y2="36" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="20" cy="36" r="2.5" fill="#333"/>
+      <line x1="20" y1="4" x2="32" y2="1" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <line x1="20" y1="8" x2="32" y2="5" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    20 kt<br>(two barbs)
+  </div>
+  <div class="barb-example">
+    <svg viewBox="0 0 40 40" width="40" height="40">
+      <line x1="20" y1="4" x2="20" y2="36" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="20" cy="36" r="2.5" fill="#333"/>
+      <line x1="20" y1="4" x2="32" y2="1" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <line x1="20" y1="8" x2="32" y2="5" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <line x1="20" y1="12" x2="26" y2="10" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    25 kt<br>(2 + half)
+  </div>
+  <div class="barb-example">
+    <svg viewBox="0 0 40 40" width="40" height="40">
+      <line x1="20" y1="4" x2="20" y2="36" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="20" cy="36" r="2.5" fill="#333"/>
+      <polygon points="20,4 32,6 20,9" fill="#333"/>
+    </svg>
+    50 kt<br>(pennant)
+  </div>
+</div>
+
+<table>
+  <tr><th>Symbol</th><th>Value</th></tr>
+  <tr><td>Concentric circles</td><td>Calm (wind &lt; 3 kt)</td></tr>
+  <tr><td>Half barb (short line)</td><td>5 knots</td></tr>
+  <tr><td>Full barb (long line)</td><td>10 knots</td></tr>
+  <tr><td>Pennant (filled triangle)</td><td>50 knots</td></tr>
+</table>
+
+<p>Wind speed is rounded to the nearest 5 knots. Barbs are additive: a pennant + two full barbs + one half barb = 75 kt. The circle dot at the station end marks the observation point.</p>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="data-sources" class="page-break">17. Data Sources</h2>
+
+<table>
+  <tr><th>Data</th><th>Source</th><th>Cache</th><th>Notes</th></tr>
+  <tr><td>Airport database</td><td>OurAirports (CSV &rarr; JSON pipeline)</td><td>Static file</td><td>Processed by <code>scripts/build-data.js</code></td></tr>
+  <tr><td>METAR</td><td>VATSIM METAR API (via worker proxy)</td><td>10 min</td><td>Batch fetch for map, single for popup</td></tr>
+  <tr><td>TAF</td><td>aviationweather.gov TAF API (via worker proxy)</td><td>10 min</td><td>Hourly breakdown with TEMPO/BECMG handling</td></tr>
+  <tr><td>NOTAMs</td><td>FAA NOTAM API (via worker proxy)</td><td>30 min</td><td>Auto-classified critical/normal</td></tr>
+  <tr><td>AIP Charts</td><td>Autorouter airport documents API</td><td>Session</td><td>PDF charts: Airport, SID, STAR, Approach, VFR</td></tr>
+  <tr><td>Current weather</td><td>OpenWeatherMap One Call 3.0 (via proxy)</td><td>Per request</td><td>Temperature, wind, humidity, hourly forecast</td></tr>
+  <tr><td>Weather overview</td><td>OpenWeatherMap Weather Overview</td><td>Per request</td><td>AI-generated text summary</td></tr>
+  <tr><td>Weather tiles</td><td>OpenWeatherMap Tile API 1.0</td><td>Tile cache</td><td>Wind, clouds, precipitation, pressure, temperature</td></tr>
+  <tr><td>Wind grid (surface)</td><td>OpenWeatherMap (via batch proxy)</td><td>Per request</td><td>Grid points for wind barb overlay</td></tr>
+  <tr><td>Pressure-level forecast</td><td>Open-Meteo Forecast API</td><td>Per request</td><td>8 pressure levels, 24h, used for airgrams and wind calc</td></tr>
+  <tr><td>AMA data</td><td>Custom grid file (<code>ama-grid.json</code>)</td><td>Static file</td><td>1&deg;&times;1&deg; cells with AMA in feet</td></tr>
+  <tr><td>Obstacles</td><td>Custom obstacles file (<code>ama-obstacles.json</code>)</td><td>Static file</td><td>Significant obstacles with AGL/AMSL</td></tr>
+  <tr><td>Country boundaries</td><td>GeoJSON (<code>europe.geojson</code>)</td><td>Static file</td><td>European country polygons</td></tr>
+  <tr><td>Route weather (en-route)</td><td>OpenWeatherMap Weather API (via batch proxy)</td><td>10 min</td><td>6 sample points along route</td></tr>
+  <tr><td>GRAMET</td><td>Autorouter GRAMET API</td><td>Per request</td><td>Weather cross-section image</td></tr>
+  <tr><td>IFR Auto Route</td><td>Autorouter Route API</td><td>Per request</td><td>Optimal IFR routing with SID/STAR</td></tr>
+  <tr><td>SWC</td><td>ilmailusaa.fi (Finnish Aviation Weather)</td><td>Session</td><td>Scandinavia SWC image + PDF link</td></tr>
+</table>
+
+<div class="info-box">
+  All external API calls are proxied through a Cloudflare Worker (<code>owm-proxy.jjboeder.workers.dev</code>) to handle CORS restrictions and API key management.
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2 id="reference-tables" class="page-break">18. Reference Tables</h2>
+
+<h3>18.1 Color Codes</h3>
+<table>
+  <tr><th>Context</th><th>Color</th><th>Hex</th><th>Meaning</th></tr>
+  <tr><td>VFR</td><td><span class="color-swatch" style="background:#27ae60"></span></td><td>#27ae60</td><td>Visual flight rules conditions</td></tr>
+  <tr><td>MVFR</td><td><span class="color-swatch" style="background:#3498db"></span></td><td>#3498db</td><td>Marginal VFR</td></tr>
+  <tr><td>BIR</td><td><span class="color-swatch" style="background:#e67e22"></span></td><td>#e67e22</td><td>Below IFR (between MVFR and IFR)</td></tr>
+  <tr><td>IFR</td><td><span class="color-swatch" style="background:#e74c3c"></span></td><td>#e74c3c</td><td>Instrument flight rules conditions</td></tr>
+  <tr><td>LIFR</td><td><span class="color-swatch" style="background:#9b59b6"></span></td><td>#9b59b6</td><td>Low IFR</td></tr>
+  <tr><td>Icing</td><td><span class="color-swatch" style="background:#2980b9"></span></td><td>#2980b9</td><td>Icing conditions detected</td></tr>
+  <tr><td>Route line</td><td><span class="color-swatch" style="background:#2980b9"></span></td><td>#2980b9</td><td>Normal route segment</td></tr>
+  <tr><td>Alternate leg</td><td><span class="color-swatch" style="background:#e67e22"></span></td><td>#e67e22</td><td>Alternate route segment (dashed)</td></tr>
+  <tr><td>AMA &lt; 2,000 ft</td><td><span class="color-swatch" style="background:rgba(76,175,80,0.5)"></span></td><td>Green</td><td>Low terrain</td></tr>
+  <tr><td>AMA 2,000&ndash;5,000 ft</td><td><span class="color-swatch" style="background:rgba(180,180,0,0.5)"></span></td><td>Yellow</td><td>Moderate terrain</td></tr>
+  <tr><td>AMA 5,000&ndash;10,000 ft</td><td><span class="color-swatch" style="background:rgba(200,120,0,0.5)"></span></td><td>Orange</td><td>High terrain</td></tr>
+  <tr><td>AMA &ge; 10,000 ft</td><td><span class="color-swatch" style="background:rgba(200,50,40,0.5)"></span></td><td>Red</td><td>Very high terrain</td></tr>
+</table>
+
+<h3>18.2 METAR Weather Abbreviations</h3>
+<table>
+  <tr><th>Code</th><th>Meaning</th><th>Code</th><th>Meaning</th></tr>
+  <tr><td>RA</td><td>Rain</td><td>BR</td><td>Mist</td></tr>
+  <tr><td>SN</td><td>Snow</td><td>FG</td><td>Fog</td></tr>
+  <tr><td>DZ</td><td>Drizzle</td><td>HZ</td><td>Haze</td></tr>
+  <tr><td>PL</td><td>Ice pellets</td><td>FU</td><td>Smoke</td></tr>
+  <tr><td>SG</td><td>Snow grains</td><td>DU</td><td>Dust</td></tr>
+  <tr><td>GR</td><td>Hail</td><td>SA</td><td>Sand</td></tr>
+  <tr><td>GS</td><td>Small hail</td><td>SQ</td><td>Squall</td></tr>
+  <tr><td>TS</td><td>Thunderstorm</td><td>FC</td><td>Funnel cloud</td></tr>
+  <tr><td>FZ</td><td>Freezing</td><td>SS</td><td>Sandstorm</td></tr>
+  <tr><td>SH</td><td>Shower</td><td>DS</td><td>Duststorm</td></tr>
+  <tr><td>BL</td><td>Blowing</td><td>VA</td><td>Volcanic ash</td></tr>
+</table>
+
+<h3>18.3 Cloud Cover Abbreviations</h3>
+<table>
+  <tr><th>Code</th><th>Coverage</th><th>Oktas</th><th>Is ceiling?</th></tr>
+  <tr><td>FEW</td><td>Few</td><td>1&ndash;2/8</td><td>No</td></tr>
+  <tr><td>SCT</td><td>Scattered</td><td>3&ndash;4/8</td><td>No</td></tr>
+  <tr><td>BKN</td><td>Broken</td><td>5&ndash;7/8</td><td>Yes</td></tr>
+  <tr><td>OVC</td><td>Overcast</td><td>8/8</td><td>Yes</td></tr>
+  <tr><td>VV</td><td>Vertical visibility</td><td>&mdash;</td><td>Yes</td></tr>
+</table>
+
+<h3>18.4 Units</h3>
+<table>
+  <tr><th>Measurement</th><th>Unit</th><th>Conversion</th></tr>
+  <tr><td>Wind speed</td><td>Knots (kt)</td><td>1 m/s = 1.944 kt</td></tr>
+  <tr><td>Visibility (European METAR)</td><td>Meters (m)</td><td>9999 = 10+ km</td></tr>
+  <tr><td>Visibility (US METAR)</td><td>Statute miles (SM)</td><td>1 SM = 1,609.34 m</td></tr>
+  <tr><td>Ceiling / altitude</td><td>Feet (ft)</td><td>1 ft = 0.3048 m</td></tr>
+  <tr><td>Temperature</td><td>Celsius (&deg;C)</td><td>M prefix = negative (e.g. M05 = &minus;5&deg;C)</td></tr>
+  <tr><td>QNH (European)</td><td>hPa</td><td>Q prefix (e.g. Q1013)</td></tr>
+  <tr><td>QNH (US)</td><td>inHg &times; 100</td><td>A prefix (e.g. A2992 = 29.92 inHg)</td></tr>
+  <tr><td>Fuel</td><td>US gallons (gal)</td><td>1 gal JET A-1 = 3.043 kg</td></tr>
+  <tr><td>Distance</td><td>Nautical miles (nm)</td><td>1 nm = 1,852 m</td></tr>
+  <tr><td>Weight</td><td>Kilograms (kg)</td><td>&mdash;</td></tr>
+  <tr><td>CG arm</td><td>Meters (m)</td><td>&mdash;</td></tr>
+  <tr><td>Runway length/width</td><td>Shown in meters</td><td>Converted from feet in source data</td></tr>
+</table>
+
+<h3>18.5 ATC Level Labels</h3>
+<table>
+  <tr><th>Level</th><th>Display</th><th>Description</th></tr>
+  <tr><td>APP/TWR</td><td>Approach / Tower</td><td>Full approach and tower control service</td></tr>
+  <tr><td>TWR</td><td>Tower (TWR)</td><td>Tower control only</td></tr>
+  <tr><td>AFIS/Radio</td><td>AFIS / Radio</td><td>Aerodrome flight information service</td></tr>
+  <tr><td>CTAF/UNICOM</td><td>CTAF / UNICOM</td><td>Common traffic advisory frequency</td></tr>
+  <tr><td>UNCONTROLLED</td><td>Uncontrolled</td><td>No ATC service</td></tr>
+</table>
+
+<h3>18.6 Magnetic Declination</h3>
+<p>Magnetic headings use a simplified European declination model: <code>declination &asymp; 0.24 &times; longitude &minus; 2.0</code> degrees (east positive). This is an approximation suitable for planning purposes across European longitudes.</p>
+
+<h3>18.7 IFR Fuel Reserve</h3>
+<p>The standard IFR reserve is <strong>45 minutes</strong> at the selected power setting. This is applied in all fuel calculations and alternate fuel planning.</p>
+
+<hr>
+<p style="font-size: 11px; color: #888; text-align: center; margin-top: 24px;">
+  European Airports Map &mdash; User Manual<br>
+  Generated February 2026
+</p>
+
+</body>
+</html>

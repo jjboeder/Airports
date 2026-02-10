@@ -5,7 +5,7 @@ export default {
 
     // CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders() });
+      return new Response(null, { headers: corsHeaders(request) });
     }
 
     // Route: /tile/:layer/:z/:x/:y.png (OWM 1.0 tiles)
@@ -17,7 +17,7 @@ export default {
         cf: { cacheTtl: 600, cacheEverything: true }
       });
       const headers = new Headers(resp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       return new Response(resp.body, { status: resp.status, headers });
     }
 
@@ -34,7 +34,7 @@ export default {
         cf: { cacheTtl: 600, cacheEverything: true }
       });
       const headers = new Headers(resp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       return new Response(resp.body, { status: resp.status, headers });
     }
 
@@ -50,7 +50,7 @@ export default {
         cf: { cacheTtl: 600, cacheEverything: true }
       });
       const headers = new Headers(resp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       headers.set('Content-Type', 'application/json');
       return new Response(resp.body, { status: resp.status, headers });
     }
@@ -67,7 +67,7 @@ export default {
       let cached = await cache.match(cacheKey);
       if (cached) {
         const headers = new Headers(cached.headers);
-        Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
         return new Response(cached.body, { status: cached.status, headers });
       }
       const upstream = `https://metar.vatsim.net/metar.php?id=${icaoList.join(',')}`;
@@ -78,7 +78,7 @@ export default {
       });
       await cache.put(cacheKey, cacheResp.clone());
       const headers = new Headers(cacheResp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       return new Response(body, { status: 200, headers });
     }
 
@@ -93,7 +93,7 @@ export default {
       let cached = await cache.match(cacheKey);
       if (cached) {
         const headers = new Headers(cached.headers);
-        Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
         return new Response(cached.body, { status: cached.status, headers });
       }
       const upstream = 'https://notams.aim.faa.gov/notamSearch/search';
@@ -108,7 +108,7 @@ export default {
       });
       await cache.put(cacheKey, cacheResp.clone());
       const headers = new Headers(cacheResp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       return new Response(body, { status: 200, headers });
     }
 
@@ -140,7 +140,7 @@ export default {
         return resp.json();
       }));
       return new Response(JSON.stringify(results), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+        headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
       });
     }
 
@@ -180,7 +180,7 @@ export default {
       }));
 
       return new Response(JSON.stringify(results.filter(Boolean)), {
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=600', ...corsHeaders() }
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=600', ...corsHeaders(request) }
       });
     }
 
@@ -194,7 +194,7 @@ export default {
       const upstream = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric`;
       const resp = await fetch(upstream);
       const headers = new Headers(resp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       headers.set('Content-Type', 'application/json');
       return new Response(resp.body, { status: resp.status, headers });
     }
@@ -209,7 +209,7 @@ export default {
       const upstream = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric&exclude=minutely,daily,alerts`;
       const resp = await fetch(upstream, { cf: { cacheTtl: 600, cacheEverything: true } });
       const headers = new Headers(resp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       headers.set('Content-Type', 'application/json');
       return new Response(resp.body, { status: resp.status, headers });
     }
@@ -224,7 +224,7 @@ export default {
       const upstream = `https://api.openweathermap.org/data/3.0/onecall/overview?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric`;
       const resp = await fetch(upstream, { cf: { cacheTtl: 1800, cacheEverything: true } });
       const headers = new Headers(resp.headers);
-      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
       headers.set('Content-Type', 'application/json');
       return new Response(resp.body, { status: resp.status, headers });
     }
@@ -243,7 +243,7 @@ export default {
         const body = await resp.text();
         return new Response(body, {
           status: resp.status,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
         return jsonError('autorouter metartaf error: ' + e.message, 502);
@@ -267,10 +267,10 @@ export default {
         });
         if (!resp.ok) {
           const errBody = await resp.text();
-          return new Response(errBody, { status: resp.status, headers: corsHeaders() });
+          return new Response(errBody, { status: resp.status, headers: corsHeaders(request) });
         }
         const headers = new Headers(resp.headers);
-        Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
         headers.set('Cache-Control', 'max-age=600');
         return new Response(resp.body, { status: 200, headers });
       } catch (e) {
@@ -280,6 +280,8 @@ export default {
 
     // Route: /ar/route (POST) — create a route
     if (path === '/ar/route' && request.method === 'POST') {
+      const blocked = requireOrigin(request);
+      if (blocked) return blocked;
       try {
         const body = await request.json();
         const token = await getArToken(env);
@@ -296,12 +298,12 @@ export default {
         if (resp.ok) {
           return new Response(JSON.stringify({ id: respBody.trim() }), {
             status: 200,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+            headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
           });
         }
         return new Response(respBody, {
           status: resp.status,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
         return jsonError('autorouter route error: ' + e.message, 502);
@@ -311,6 +313,8 @@ export default {
     // Route: /ar/route/:id/poll (PUT) — longpoll for route result
     const arPollMatch = path.match(/^\/ar\/route\/([a-zA-Z0-9-]+)\/poll$/);
     if (arPollMatch && request.method === 'PUT') {
+      const blocked = requireOrigin(request);
+      if (blocked) return blocked;
       const routeId = arPollMatch[1];
       try {
         const token = await getArToken(env);
@@ -321,7 +325,7 @@ export default {
         const respBody = await resp.text();
         return new Response(respBody, {
           status: resp.status,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
         return jsonError('autorouter poll error: ' + e.message, 502);
@@ -331,6 +335,8 @@ export default {
     // Route: /ar/route/:id/stop (PUT)
     const arStopMatch = path.match(/^\/ar\/route\/([a-zA-Z0-9-]+)\/stop$/);
     if (arStopMatch && request.method === 'PUT') {
+      const blocked = requireOrigin(request);
+      if (blocked) return blocked;
       const routeId = arStopMatch[1];
       try {
         const token = await getArToken(env);
@@ -341,7 +347,7 @@ export default {
         const respBody = await resp.text();
         return new Response(respBody, {
           status: resp.status,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
         return jsonError('autorouter stop error: ' + e.message, 502);
@@ -351,6 +357,8 @@ export default {
     // Route: /ar/route/:id/close (PUT)
     const arCloseMatch = path.match(/^\/ar\/route\/([a-zA-Z0-9-]+)\/close$/);
     if (arCloseMatch && request.method === 'PUT') {
+      const blocked = requireOrigin(request);
+      if (blocked) return blocked;
       const routeId = arCloseMatch[1];
       try {
         const token = await getArToken(env);
@@ -361,7 +369,7 @@ export default {
         const respBody = await resp.text();
         return new Response(respBody, {
           status: resp.status,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
         return jsonError('autorouter close error: ' + e.message, 502);
@@ -379,7 +387,7 @@ export default {
         let cached = await cache.match(cacheKey);
         if (cached) {
           const headers = new Headers(cached.headers);
-          Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+          Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
           return new Response(cached.body, { status: 200, headers });
         }
         const resp = await fetch(`https://api.autorouter.aero/v1.0/pams/airport/${icao}`, {
@@ -394,7 +402,7 @@ export default {
         }
         return new Response(body, {
           status: resp.status,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
         return jsonError('autorouter airport-docs error: ' + e.message, 502);
@@ -412,10 +420,10 @@ export default {
         });
         if (!resp.ok) {
           const errBody = await resp.text();
-          return new Response(errBody, { status: resp.status, headers: corsHeaders() });
+          return new Response(errBody, { status: resp.status, headers: corsHeaders(request) });
         }
         const headers = new Headers(resp.headers);
-        Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
         return new Response(resp.body, { status: 200, headers });
       } catch (e) {
         return jsonError('autorouter airport-doc error: ' + e.message, 502);
@@ -433,10 +441,10 @@ export default {
         });
         if (!resp.ok) {
           const errBody = await resp.text();
-          return new Response(errBody, { status: resp.status, headers: corsHeaders() });
+          return new Response(errBody, { status: resp.status, headers: corsHeaders(request) });
         }
         const headers = new Headers(resp.headers);
-        Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
         headers.set('Content-Disposition', `inline; filename="${icao}_charts.pdf"`);
         return new Response(resp.body, { status: 200, headers });
       } catch (e) {
@@ -456,14 +464,139 @@ export default {
         const body = await resp.text();
         return new Response(body, {
           status: resp.status,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
         return jsonError('autorouter aircraft error: ' + e.message, 502);
       }
     }
 
-    return new Response('Not found', { status: 404, headers: corsHeaders() });
+    // Route: /briefing (POST) — AI weather briefing via Anthropic API
+    if (path === '/briefing' && request.method === 'POST') {
+      const blocked = requireOrigin(request);
+      if (blocked) return blocked;
+      try {
+        const body = await request.json();
+        if (!body || !body.type || !body.data) {
+          return jsonError('type and data required', 400);
+        }
+
+        const systemPrompt = `You are an aviation weather briefing assistant for a DA62 pilot operating in Europe. Generate concise, structured pilot weather briefings from the provided data.
+
+Format your briefing with these sections (use ## headings):
+## Current Conditions (for airport briefings) or ## Departure (for route briefings)
+## Forecast
+## En-Route Weather (route briefings only)
+## Winds Aloft (route briefings only, if airgram data provided)
+## Destination (route briefings only)
+## NOTAMs (if any provided)
+## Flight Level Recommendation (route briefings only, if FL compare data provided)
+## Summary & Recommendations
+
+Guidelines:
+- Use standard aviation terminology
+- Use metric units (meters visibility, hPa pressure) plus feet for altitude/ceiling
+- Flag: icing risk, strong winds (>15kt) or gusts (>20kt), crosswind components, low visibility (<5km), thunderstorms, turbulence
+- Note runway suitability concerns if runway data is available
+- When airgram data is provided, summarize winds and temperatures at key altitude levels relevant to the flight
+- When FL compare data is provided, identify the optimal flight level for time/fuel and compare against the selected FL. Note headwind/tailwind differences. Recommend an FL if a significantly better option exists (>5 min or >2 gal savings)
+- Keep concise: 200-350 words
+- If insufficient data is provided, state what's missing and brief on what you can`;
+
+        let userContent;
+        if (body.type === 'airport') {
+          const d = body.data;
+          userContent = `Generate a weather briefing for ${d.icao || 'unknown'} (${d.name || 'unknown'}).
+Elevation: ${d.elevation || 'unknown'} ft
+
+METAR: ${d.metar || 'Not available'}
+
+TAF: ${d.taf || 'Not available'}
+
+NOTAMs: ${d.notams && d.notams.length > 0 ? d.notams.map(n => n.id + ': ' + n.text).join('\n') : 'None available'}`;
+        } else if (body.type === 'route') {
+          const d = body.data;
+          const wpList = (d.waypoints || []).map((wp, i) => {
+            const leg = d.legs && d.legs[i] ? ` → next leg: ${d.legs[i].dist}nm, hdg ${d.legs[i].hdg}°, ${d.legs[i].time}h, ${d.legs[i].fuel}gal` : '';
+            return `${wp.code} (${wp.name || ''}, elev ${wp.elevation || '?'} ft)${leg}`;
+          }).join('\n');
+
+          const enrouteWx = (d.enroute || []).map(s =>
+            `(${s.lat.toFixed(1)},${s.lon.toFixed(1)}): wind ${s.windDir || '?'}°/${s.windSpd || '?'}kt, ${s.weather || '?'}, temp ${s.temp || '?'}°C, vis ${s.vis || '?'}m`
+          ).join('\n');
+
+          const airgramStr = d.airgramSummary && d.airgramSummary.length > 0
+            ? d.airgramSummary.map(a => `${a.level}hPa (~FL${Math.round(a.altFt / 100)}): wind ${a.windDir}°/${a.windSpd}kt, temp ${a.temp}°C, cloud ${a.cloud}%`).join('\n')
+            : 'Not available';
+
+          const flCompStr = d.flCompare && d.flCompare.length > 0
+            ? d.flCompare.map(f => `FL${f.fl < 100 ? '0' : ''}${f.fl}: ${f.timeH}h, ${f.fuelGal}gal, avg HW ${f.hwKt > 0 ? '+' : ''}${f.hwKt}kt`).join('\n')
+            : 'Not available';
+
+          userContent = `Generate a route weather briefing.
+
+Flight Level: FL${d.flightLevel || '?'}
+Departure Time: ${d.departureTime || 'Not set'}
+
+Waypoints:
+${wpList}
+
+Departure Weather:
+METAR: ${(d.departure && d.departure.metar) || 'Not available'}
+TAF: ${(d.departure && d.departure.taf) || 'Not available'}
+NOTAMs: ${d.departure && d.departure.notams && d.departure.notams.length > 0 ? d.departure.notams.map(n => n.id + ': ' + n.text).join('\n') : 'None'}
+
+En-Route Weather Samples (surface):
+${enrouteWx || 'Not available'}
+
+Winds Aloft (route-average by pressure level):
+${airgramStr}
+
+FL Compare (time/fuel/headwind for FL10-FL200, selected FL${d.flightLevel || '?'}):
+${flCompStr}
+
+Destination:
+TAF: ${(d.destination && d.destination.taf) || 'Not available'}
+NOTAMs: ${d.destination && d.destination.notams && d.destination.notams.length > 0 ? d.destination.notams.map(n => n.id + ': ' + n.text).join('\n') : 'None'}`;
+        } else {
+          return jsonError('type must be "airport" or "route"', 400);
+        }
+
+        const anthropicResp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 1024,
+            stream: true,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userContent }]
+          })
+        });
+
+        if (!anthropicResp.ok) {
+          const errText = await anthropicResp.text();
+          return jsonError('Anthropic API error: ' + anthropicResp.status + ' ' + errText, 502);
+        }
+
+        // Pipe the SSE stream through to the client
+        const headers = new Headers({
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          ...corsHeaders(request)
+        });
+
+        return new Response(anthropicResp.body, { status: 200, headers });
+      } catch (e) {
+        return jsonError('briefing error: ' + e.message, 500);
+      }
+    }
+
+    return new Response('Not found', { status: 404, headers: corsHeaders(request) });
   }
 };
 
@@ -500,17 +633,48 @@ async function getArToken(env) {
   return token;
 }
 
-function corsHeaders() {
+const ALLOWED_ORIGINS = [
+  'https://jjboeder.github.io',
+  'http://localhost',
+  'http://127.0.0.1'
+];
+
+function getAllowedOrigin(request) {
+  const origin = request.headers.get('Origin') || '';
+  return ALLOWED_ORIGINS.some(o => origin === o || origin.startsWith(o + ':')) ? origin : null;
+}
+
+function corsHeaders(request) {
+  const origin = request ? getAllowedOrigin(request) : null;
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin || 'https://jjboeder.github.io',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
   };
 }
 
+function requireOrigin(request) {
+  const origin = request.headers.get('Origin') || '';
+  const referer = request.headers.get('Referer') || '';
+  const originOk = ALLOWED_ORIGINS.some(o => origin === o || origin.startsWith(o + ':'));
+  const refererOk = ALLOWED_ORIGINS.some(o => referer.startsWith(o));
+  if (!originOk && !refererOk) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
+    });
+  }
+  return null;
+}
+
 function jsonError(message, status) {
   return new Response(JSON.stringify({ error: message }), {
     status: status,
-    headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': 'https://jjboeder.github.io',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    }
   });
 }

@@ -6,7 +6,9 @@ compatibility_date = "2024-12-01"
 #   cd worker && npx wrangler secret put OWM_KEY
 #   cd worker && npx wrangler secret put AR_EMAIL
 #   cd worker && npx wrangler secret put AR_PASSWORD
+#   cd worker && npx wrangler secret put ANTHROPIC_API_KEY
 # For local dev, create worker/.dev.vars with:
 #   OWM_KEY=your_key_here
 #   AR_EMAIL=your_autorouter_email
 #   AR_PASSWORD=your_autorouter_password
+#   ANTHROPIC_API_KEY=your_anthropic_key

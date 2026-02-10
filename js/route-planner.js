@@ -53,6 +53,8 @@
   var wxRefreshTimer = null;
   var WX_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
   var OWM_PROXY = 'https://owm-proxy.jjboeder.workers.dev';
+  var routeWxOverlay = []; // [{lat, lon, windSpd, windDir, cloud}, ...]
+  var routeWxMarkers = null; // L.layerGroup for on-map wind barbs
 
   // Autorouter state
   var autoRouteId = null;      // current autorouter route ID
@@ -595,7 +597,7 @@
       var a = waypoints[i].latlng;
       var b = waypoints[i + 1].latlng;
       var maxAma = getLegMaxAMA(a.lat, a.lng, b.lat, b.lng);
-      if (maxAma > 0 && altFt <= maxAma) {
+      if (maxAma > 0 && altFt < maxAma) {
         warnings.push({ leg: i, maxAma: maxAma });
       }
     }
@@ -727,6 +729,8 @@
     routeWxCache = {};
     routeOwmCache = {};
     routeOwmSamples = [];
+    routeWxOverlay = [];
+    if (routeWxMarkers) routeWxMarkers.clearLayers();
     autoRouteId = null;
     autoRoutePolling = false;
     lastFpl = null;
@@ -909,13 +913,13 @@
             html += '<span class="wind-badge">' + (app.WIND_SVG || 'W') + '</span>';
           }
           if (wxIcing) {
-            html += '<span class="ice-badge">' + (app.ICE_SVG || 'ICE') + '</span>';
+            html += ' <span class="route-wp-wx" style="background:#5dade2;">\u2744</span>';
           }
-          // NOTAM badge
+          // NOTAM badge (same style as wx badge)
           if (app.notamCache && app.notamCache[wp.code] && app.notamCache[wp.code].count > 0) {
             var nd = app.notamCache[wp.code];
-            var notamBadgeClass = nd.hasCritical ? 'notam-badge notam-badge-critical' : 'notam-badge';
-            html += '<span class="' + notamBadgeClass + '">' + (app.NOTAM_SVG || '!') + '</span>';
+            var notamColor = nd.hasCritical ? '#e74c3c' : '#f0ad4e';
+            html += ' <span class="route-wp-wx" style="background:' + notamColor + ';">N</span>';
           }
         } else {
           html += ' <span class="route-wp-wx route-wp-wx-none">-</span>';
@@ -1088,6 +1092,9 @@
         thtml += '</div>';
       }
 
+      // Icing warning placeholder (populated asynchronously alongside wind totals)
+      thtml += '<div id="route-icing-warning"></div>';
+
       // Action buttons
       if (waypoints.length >= 2) {
         thtml += '<div class="route-wx-btns">';
@@ -1135,6 +1142,14 @@
       // Re-check element still exists (panel may have re-rendered)
       el = document.getElementById('route-wind-totals');
       if (!el || !responses) return;
+
+      // Extract wind/cloud overlay for route map print
+      extractRouteWxOverlay(responses, samples);
+
+      // Check and render icing warnings
+      var icingResult = checkRouteIcing(responses, samples);
+      var icingEl = document.getElementById('route-icing-warning');
+      if (icingEl) renderIcingWarning(icingEl, icingResult);
 
       var result = computeWindTotals(responses, samples, profile);
       if (!result) return;
@@ -1300,6 +1315,396 @@
     };
   }
 
+  // --- Extract wind/cloud overlay for route map ---
+
+  function extractRouteWxOverlay(responses, samples) {
+    var app = window.AirportApp;
+    var LEVELS = app.AIRGRAM_LEVELS;
+    if (!LEVELS) { routeWxOverlay = []; return; }
+    var nLevels = LEVELS.length;
+    var nPoints = samples.length;
+    var stdHts = [111, 762, 1457, 2164, 3012, 4206, 5574, 6344];
+
+    // Parse grid: grid[levelIdx][pointIdx] = {windSpd, windDir, cloud, geoHt, temp, rh}
+    var grid = [];
+    for (var li = 0; li < nLevels; li++) {
+      grid[li] = [];
+      var lev = LEVELS[li];
+      var wsKey = 'wind_speed_' + lev + 'hPa';
+      var wdKey = 'wind_direction_' + lev + 'hPa';
+      var ccKey = 'cloud_cover_' + lev + 'hPa';
+      var ghKey = 'geopotential_height_' + lev + 'hPa';
+      var tKey = 'temperature_' + lev + 'hPa';
+      var rhKey = 'relative_humidity_' + lev + 'hPa';
+      for (var pi = 0; pi < nPoints; pi++) {
+        var resp = responses[pi];
+        var hourly = resp && resp.hourly;
+        if (!hourly || !hourly.time) {
+          grid[li][pi] = { windSpd: null, windDir: null, cloud: null, geoHt: stdHts[li], temp: null, rh: null };
+          continue;
+        }
+        var hi = 0;
+        if (samples[pi].etaEpoch) {
+          var etaMs = samples[pi].etaEpoch * 1000;
+          var bestDiff = Infinity;
+          for (var h = 0; h < hourly.time.length; h++) {
+            var diff = Math.abs(new Date(hourly.time[h]).getTime() - etaMs);
+            if (diff < bestDiff) { bestDiff = diff; hi = h; }
+          }
+        }
+        grid[li][pi] = {
+          windSpd: hourly[wsKey] ? hourly[wsKey][hi] : null,
+          windDir: hourly[wdKey] ? hourly[wdKey][hi] : null,
+          cloud: hourly[ccKey] ? hourly[ccKey][hi] : null,
+          geoHt: hourly[ghKey] ? hourly[ghKey][hi] : stdHts[li],
+          temp: hourly[tKey] ? hourly[tKey][hi] : null,
+          rh: hourly[rhKey] ? hourly[rhKey][hi] : null
+        };
+      }
+    }
+
+    // Average geopotential heights per level
+    var avgGeoHt = [];
+    for (var li = 0; li < nLevels; li++) {
+      var sum = 0, cnt = 0;
+      for (var pi = 0; pi < nPoints; pi++) {
+        if (grid[li][pi].geoHt != null) { sum += grid[li][pi].geoHt; cnt++; }
+      }
+      avgGeoHt[li] = cnt > 0 ? sum / cnt : stdHts[li];
+    }
+
+    var fl = getFL();
+    var altM = fl * 100 * 0.3048;
+
+    var overlay = [];
+    for (var pi = 0; pi < nPoints; pi++) {
+      var spd = null, dir = null, cloud = null, temp = null, rh = null;
+      for (var li = 0; li < nLevels - 1; li++) {
+        var h0 = avgGeoHt[li], h1 = avgGeoHt[li + 1];
+        if (altM >= h0 && altM <= h1) {
+          var frac = (altM - h0) / (h1 - h0);
+          var s0 = grid[li][pi].windSpd, s1 = grid[li + 1][pi].windSpd;
+          var d0 = grid[li][pi].windDir, d1 = grid[li + 1][pi].windDir;
+          var c0 = grid[li][pi].cloud, c1 = grid[li + 1][pi].cloud;
+          var t0 = grid[li][pi].temp, t1 = grid[li + 1][pi].temp;
+          var rh0 = grid[li][pi].rh, rh1 = grid[li + 1][pi].rh;
+          if (s0 != null && s1 != null) spd = s0 + frac * (s1 - s0);
+          if (d0 != null && d1 != null) dir = interpAngle(d0, d1, frac);
+          if (c0 != null && c1 != null) cloud = c0 + frac * (c1 - c0);
+          if (t0 != null && t1 != null) temp = t0 + frac * (t1 - t0);
+          if (rh0 != null && rh1 != null) rh = rh0 + frac * (rh1 - rh0);
+          break;
+        }
+      }
+      // Clamp to lowest/highest level if outside range
+      if (spd == null && altM <= avgGeoHt[0]) {
+        spd = grid[0][pi].windSpd; dir = grid[0][pi].windDir; cloud = grid[0][pi].cloud;
+        temp = grid[0][pi].temp; rh = grid[0][pi].rh;
+      }
+      if (spd == null && altM >= avgGeoHt[nLevels - 1]) {
+        spd = grid[nLevels - 1][pi].windSpd; dir = grid[nLevels - 1][pi].windDir; cloud = grid[nLevels - 1][pi].cloud;
+        temp = grid[nLevels - 1][pi].temp; rh = grid[nLevels - 1][pi].rh;
+      }
+      if (spd != null) {
+        // Compute route bearing at this point from adjacent samples
+        var brg = 0;
+        if (pi < nPoints - 1) {
+          brg = initialBearing(samples[pi].lat, samples[pi].lon, samples[pi + 1].lat, samples[pi + 1].lon);
+        } else if (pi > 0) {
+          brg = initialBearing(samples[pi - 1].lat, samples[pi - 1].lon, samples[pi].lat, samples[pi].lon);
+        }
+        var roundTemp = temp != null ? Math.round(temp) : null;
+        var icing = temp != null && cloud != null && rh != null
+          && temp >= -20 && temp <= 2 && (cloud > 50 || rh > 80);
+        overlay.push({
+          lat: samples[pi].lat,
+          lon: samples[pi].lon,
+          windSpd: Math.round(spd),
+          windDir: Math.round(dir || 0),
+          cloud: cloud != null ? Math.round(cloud) : null,
+          temp: roundTemp,
+          rh: rh != null ? Math.round(rh) : null,
+          icing: icing,
+          routeBrg: brg
+        });
+      }
+    }
+    routeWxOverlay = overlay;
+    renderRouteWxOnMap();
+  }
+
+  // Check icing conditions along the route at all relevant altitude levels
+  function checkRouteIcing(responses, samples) {
+    var app = window.AirportApp;
+    var LEVELS = app.AIRGRAM_LEVELS;
+    if (!LEVELS || !responses || responses.length === 0 || samples.length === 0) return null;
+    var nLevels = LEVELS.length;
+    var stdHts = [111, 762, 1457, 2164, 3012, 4206, 5574, 6344];
+    var fl = getFL();
+    var cruiseM = fl * 100 * 0.3048;
+
+    // Helper: check icing at a single grid point for a given response and hour index
+    function getHourIdx(resp, sample) {
+      var hourly = resp && resp.hourly;
+      if (!hourly || !hourly.time) return 0;
+      var hi = 0;
+      if (sample.etaEpoch) {
+        var etaMs = sample.etaEpoch * 1000;
+        var bestDiff = Infinity;
+        for (var h = 0; h < hourly.time.length; h++) {
+          var diff = Math.abs(new Date(hourly.time[h]).getTime() - etaMs);
+          if (diff < bestDiff) { bestDiff = diff; hi = h; }
+        }
+      }
+      return hi;
+    }
+
+    function getLevelData(resp, hi, li) {
+      var hourly = resp && resp.hourly;
+      if (!hourly) return null;
+      var lev = LEVELS[li];
+      var tKey = 'temperature_' + lev + 'hPa';
+      var ccKey = 'cloud_cover_' + lev + 'hPa';
+      var rhKey = 'relative_humidity_' + lev + 'hPa';
+      var ghKey = 'geopotential_height_' + lev + 'hPa';
+      var temp = hourly[tKey] ? hourly[tKey][hi] : null;
+      var cloud = hourly[ccKey] ? hourly[ccKey][hi] : null;
+      var rh = hourly[rhKey] ? hourly[rhKey][hi] : null;
+      var geoHt = hourly[ghKey] ? hourly[ghKey][hi] : stdHts[li];
+      return { temp: temp, cloud: cloud, rh: rh, geoHt: geoHt };
+    }
+
+    function isIcing(temp, cloud, rh) {
+      return temp != null && cloud != null && rh != null
+        && temp >= -20 && temp <= 2 && (cloud > 50 || rh > 80);
+    }
+
+    // Check climb/descent layers at dep or arrival
+    function checkVertical(resp, sample, elevFt) {
+      if (!resp || !resp.hourly) return [];
+      var hi = getHourIdx(resp, sample);
+      var elevM = elevFt * 0.3048;
+      var minM = Math.min(elevM, cruiseM);
+      var maxM = Math.max(elevM, cruiseM);
+      var icingLevels = [];
+      for (var li = 0; li < nLevels; li++) {
+        var d = getLevelData(resp, hi, li);
+        if (!d) continue;
+        if (d.geoHt >= minM - 100 && d.geoHt <= maxM + 100) {
+          if (isIcing(d.temp, d.cloud, d.rh)) {
+            var flVal = Math.round(d.geoHt / 0.3048 / 100);
+            icingLevels.push({ fl: flVal, temp: Math.round(d.temp) });
+          }
+        }
+      }
+      return icingLevels;
+    }
+
+    // En-route: icing flags from overlay (already computed at cruise FL)
+    var enroute = [];
+    for (var i = 0; i < routeWxOverlay.length; i++) {
+      if (routeWxOverlay[i].icing) {
+        enroute.push({ idx: i, temp: routeWxOverlay[i].temp });
+      }
+    }
+
+    // Departure: first waypoint
+    var departure = [];
+    var depCode = '';
+    var depMinFL = 0, depMaxFL = 0;
+    if (waypoints.length >= 2 && waypoints[0].data) {
+      var depElev = parseFloat(waypoints[0].data[5]) || 0;
+      depCode = waypoints[0].code || '';
+      departure = checkVertical(responses[0], samples[0], depElev);
+      if (departure.length > 0) {
+        var fls = departure.map(function (d) { return d.fl; });
+        depMinFL = Math.min.apply(null, fls);
+        depMaxFL = Math.max.apply(null, fls);
+      }
+    }
+
+    // Arrival: last waypoint before alternate (or last waypoint if no alternate)
+    var arrival = [];
+    var arrCode = '';
+    var arrMinFL = 0, arrMaxFL = 0;
+    var arrWpIdx = alternateIndex > 0 ? alternateIndex - 1 : waypoints.length - 1;
+    if (arrWpIdx >= 0 && waypoints[arrWpIdx] && waypoints[arrWpIdx].data) {
+      var arrElev = parseFloat(waypoints[arrWpIdx].data[5]) || 0;
+      arrCode = waypoints[arrWpIdx].code || '';
+      // Use the last sample point (or closest to arrival)
+      var arrSampleIdx = responses.length - 1;
+      if (alternateIndex > 0 && samples.length > 2) {
+        // Find sample closest to arrival waypoint
+        var arrLat = waypoints[arrWpIdx].latlng.lat;
+        var arrLon = waypoints[arrWpIdx].latlng.lng;
+        var bestDist = Infinity;
+        for (var si = 0; si < samples.length; si++) {
+          var d = haversineNm(arrLat, arrLon, samples[si].lat, samples[si].lon);
+          if (d < bestDist) { bestDist = d; arrSampleIdx = si; }
+        }
+      }
+      arrival = checkVertical(responses[arrSampleIdx], samples[arrSampleIdx], arrElev);
+      if (arrival.length > 0) {
+        var fls = arrival.map(function (d) { return d.fl; });
+        arrMinFL = Math.min.apply(null, fls);
+        arrMaxFL = Math.max.apply(null, fls);
+      }
+    }
+
+    if (departure.length === 0 && enroute.length === 0 && arrival.length === 0) return null;
+
+    return {
+      enroute: enroute,
+      departure: departure,
+      arrival: arrival,
+      depCode: depCode,
+      destCode: arrCode,
+      depMinFL: depMinFL,
+      depMaxFL: depMaxFL,
+      arrMinFL: arrMinFL,
+      arrMaxFL: arrMaxFL
+    };
+  }
+
+  function renderIcingWarning(el, result) {
+    if (!result) { el.innerHTML = ''; return; }
+    var fl = getFL();
+    var flLabel = 'FL' + (fl < 100 ? '0' : '') + fl;
+    var lines = [];
+    if (result.departure.length > 0) {
+      var range = result.depMinFL === result.depMaxFL
+        ? 'FL' + String(result.depMinFL).padStart(3, '0')
+        : 'FL' + String(result.depMinFL).padStart(3, '0') + '\u2013' + String(result.depMaxFL).padStart(3, '0');
+      lines.push(escapeHtml(result.depCode) + ' ' + range + ' (climb)');
+    }
+    if (result.enroute.length > 0) {
+      var pct = Math.round(result.enroute.length / routeWxOverlay.length * 100);
+      lines.push(flLabel + ' \u2013 ~' + pct + '% of route');
+    }
+    if (result.arrival.length > 0) {
+      var range = result.arrMinFL === result.arrMaxFL
+        ? 'FL' + String(result.arrMinFL).padStart(3, '0')
+        : 'FL' + String(result.arrMinFL).padStart(3, '0') + '\u2013' + String(result.arrMaxFL).padStart(3, '0');
+      lines.push(escapeHtml(result.destCode) + ' ' + range + ' (descent)');
+    }
+    if (lines.length === 0) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div class="route-icing-warning">&#10052; Icing conditions: ' + lines.join(', ') + '</div>';
+  }
+
+  function cloudCoverSvgHtml(pct, size) {
+    var r = size / 2;
+    var svg = '<svg viewBox="' + (-r - 1) + ' ' + (-r - 1) + ' ' + (size + 2) + ' ' + (size + 2) + '" width="' + (size + 2) + '" height="' + (size + 2) + '">';
+    svg += '<circle cx="0" cy="0" r="' + r + '" fill="#fff" stroke="#334" stroke-width="1.2"/>';
+    if (pct >= 88) {
+      svg += '<circle cx="0" cy="0" r="' + r + '" fill="#334" stroke="#334" stroke-width="1.2"/>';
+    } else if (pct > 12) {
+      var frac = pct / 100;
+      var angle = frac * 2 * Math.PI;
+      var endX = (r * Math.sin(angle)).toFixed(1);
+      var endY = (-r * Math.cos(angle)).toFixed(1);
+      var large = angle > Math.PI ? 1 : 0;
+      svg += '<path d="M0,0 L0,' + (-r) + ' A' + r + ',' + r + ' 0 ' + large + ',1 ' + endX + ',' + endY + ' Z" fill="#334"/>';
+    }
+    svg += '</svg>';
+    return svg;
+  }
+
+  function renderRouteWxOnMap() {
+    if (!routeWxMarkers) return;
+    routeWxMarkers.clearLayers();
+    var wxCb = document.getElementById('route-wx-show');
+    if (wxCb && !wxCb.checked) return;
+    if (routeWxOverlay.length === 0) return;
+
+    // Skip every other if dense
+    var step = routeWxOverlay.length > 12 ? 2 : 1;
+    var fl = getFL();
+    var flLabel = 'FL' + (fl < 100 ? '0' : '') + fl;
+
+    // Perpendicular offset in nm (to the right of route direction)
+    var offsetNm = 4;
+
+    for (var i = 0; i < routeWxOverlay.length; i += step) {
+      var ow = routeWxOverlay[i];
+      // Offset position perpendicular to route (90° to the right)
+      var perpBrg = ((ow.routeBrg || 0) + 90) % 360;
+      var perpRad = perpBrg * DEG;
+      var dLat = offsetNm / 60 * Math.cos(perpRad);
+      var dLon = offsetNm / 60 * Math.sin(perpRad) / Math.cos(ow.lat * DEG);
+      var mLat = ow.lat + dLat;
+      var mLon = ow.lon + dLon;
+      // Blue color for icing points
+      var barbColor = ow.icing ? '#2980b9' : '#334';
+      // Build wind barb SVG (viewBox 40x40, rendered at 26px)
+      var barbHtml = '';
+      if (ow.windSpd < 3) {
+        barbHtml = '<svg viewBox="0 0 40 40" width="26" height="26">'
+          + '<circle cx="20" cy="20" r="6" fill="none" stroke="' + barbColor + '" stroke-width="2.5"/>'
+          + '<circle cx="20" cy="20" r="2" fill="' + barbColor + '"/></svg>';
+      } else {
+        var barbs = [];
+        var rem = Math.round(ow.windSpd / 5) * 5;
+        var y = 4;
+        while (rem >= 50) {
+          barbs.push('<polygon points="20,' + y + ' 32,' + (y + 2) + ' 20,' + (y + 5) + '" fill="' + barbColor + '"/>');
+          y += 6; rem -= 50;
+        }
+        while (rem >= 10) {
+          barbs.push('<line x1="20" y1="' + y + '" x2="32" y2="' + (y - 3) + '" stroke="' + barbColor + '" stroke-width="2.5" stroke-linecap="round"/>');
+          y += 4; rem -= 10;
+        }
+        if (rem >= 5) {
+          barbs.push('<line x1="20" y1="' + y + '" x2="26" y2="' + (y - 2) + '" stroke="' + barbColor + '" stroke-width="2.5" stroke-linecap="round"/>');
+        }
+        barbHtml = '<svg viewBox="0 0 40 40" width="26" height="26">'
+          + '<g transform="rotate(' + ow.windDir + ', 20, 20)">'
+          + '<line x1="20" y1="4" x2="20" y2="36" stroke="' + barbColor + '" stroke-width="2.5" stroke-linecap="round"/>'
+          + '<circle cx="20" cy="36" r="3" fill="' + barbColor + '"/>'
+          + barbs.join('') + '</g></svg>';
+      }
+
+      // Cloud circle
+      var cloudHtml = '';
+      if (ow.cloud != null) {
+        cloudHtml = cloudCoverSvgHtml(ow.cloud, 10);
+      }
+
+      // Ice crystal for icing points (4-line star)
+      var iceHtml = '';
+      if (ow.icing) {
+        iceHtml = '<svg viewBox="0 0 12 12" width="12" height="12" style="margin-left:1px">'
+          + '<line x1="6" y1="1" x2="6" y2="11" stroke="#2980b9" stroke-width="1.5"/>'
+          + '<line x1="1" y1="6" x2="11" y2="6" stroke="#2980b9" stroke-width="1.5"/>'
+          + '<line x1="2.5" y1="2.5" x2="9.5" y2="9.5" stroke="#2980b9" stroke-width="1.2"/>'
+          + '<line x1="9.5" y1="2.5" x2="2.5" y2="9.5" stroke="#2980b9" stroke-width="1.2"/>'
+          + '</svg>';
+      }
+
+      var label = ow.windSpd + 'kt';
+      var html = '<div class="route-wx-barb-icon">'
+        + '<div class="route-wx-barb-row">' + barbHtml + cloudHtml + iceHtml + '</div>'
+        + '<span class="wind-barb-label">' + label + '</span></div>';
+      var icon = L.divIcon({
+        className: 'wind-barb-marker',
+        html: html,
+        iconSize: [ow.icing ? 56 : 42, 40],
+        iconAnchor: [14, 14]
+      });
+      // Tooltip with wind and cloud details
+      var cloudLabel = ow.cloud != null
+        ? (ow.cloud <= 12 ? 'CLR' : ow.cloud <= 25 ? 'FEW' : ow.cloud <= 50 ? 'SCT' : ow.cloud <= 87 ? 'BKN' : 'OVC')
+          + ' (' + ow.cloud + '%)'
+        : '';
+      var tip = flLabel
+        + ' \u2013 Wind ' + String(Math.round(ow.windDir)).padStart(3, '0') + '\u00b0/' + ow.windSpd + 'kt'
+        + (cloudLabel ? ' \u2013 Cloud ' + cloudLabel : '')
+        + (ow.icing ? ' \u2013 ICING (' + ow.temp + '\u00b0C)' : '');
+      L.marker([mLat, mLon], { icon: icon, interactive: true })
+        .bindTooltip(tip, { direction: 'top', offset: [0, -14] })
+        .addTo(routeWxMarkers);
+    }
+  }
+
   // --- Route Weather floating panel ---
 
   var rwPanelLoaded = {}; // track which tabs have been populated
@@ -1327,12 +1732,271 @@
       loadRouteGramet();
     } else if (tab === 'rw-flcomp') {
       loadFlComparison();
+    } else if (tab === 'rw-briefing') {
+      loadRouteBriefing();
     }
   }
 
   function closeRouteWxPanel() {
     var panel = document.getElementById('route-wx-panel');
     if (panel) panel.style.display = 'none';
+  }
+
+  function loadRouteBriefing() {
+    var el = document.getElementById('rw-briefing');
+    if (!el || !window.AirportApp.streamBriefing) return;
+    if (waypoints.length < 2) {
+      el.innerHTML = '<div class="briefing-content">Add at least 2 waypoints to generate a route briefing.</div>';
+      return;
+    }
+
+    var app = window.AirportApp;
+    var fl = getFL();
+    var depEpoch = getDepEpoch();
+    var depTime = depEpoch ? new Date(depEpoch * 1000).toISOString().slice(0, 16) + 'Z' : null;
+
+    // Collect waypoints and legs
+    var wpData = [];
+    for (var i = 0; i < waypoints.length; i++) {
+      var wp = waypoints[i];
+      wpData.push({
+        code: wp.code || ('WP' + (i + 1)),
+        name: wp.name || '',
+        elevation: wp.data ? wp.data[5] : null
+      });
+    }
+    var legData = [];
+    for (var i = 0; i < legs.length; i++) {
+      legData.push({
+        dist: Math.round(legs[i].dist),
+        hdg: Math.round(legs[i].magHdg),
+        time: legs[i].time ? legs[i].time.toFixed(2) : '?',
+        fuel: legs[i].fuel ? legs[i].fuel.toFixed(1) : '?'
+      });
+    }
+
+    // Departure data
+    var depCode = waypoints[0].code;
+    var depMetar = app.metarCache && app.metarCache[depCode] ? app.metarCache[depCode].raw : null;
+    var depTaf = app.rawTafCache && app.rawTafCache[depCode] ? app.rawTafCache[depCode] : null;
+    if (!depTaf) {
+      var taf = routeWxCache[depCode] || (app.tafCache && app.tafCache[depCode]);
+      if (taf && taf.length && taf[0].rawTAF) depTaf = taf[0].rawTAF;
+    }
+    var depNotams = [];
+    if (app.notamCache && app.notamCache[depCode] && app.notamCache[depCode].notams) {
+      for (var i = 0; i < app.notamCache[depCode].notams.length; i++) {
+        var n = app.notamCache[depCode].notams[i];
+        depNotams.push({ id: n.id, text: n.text });
+      }
+    }
+
+    // Destination data
+    var destCode = waypoints[waypoints.length - 1].code;
+    var destTaf = app.rawTafCache && app.rawTafCache[destCode] ? app.rawTafCache[destCode] : null;
+    if (!destTaf) {
+      var taf = routeWxCache[destCode] || (app.tafCache && app.tafCache[destCode]);
+      if (taf && taf.length && taf[0].rawTAF) destTaf = taf[0].rawTAF;
+    }
+    var destNotams = [];
+    if (app.notamCache && app.notamCache[destCode] && app.notamCache[destCode].notams) {
+      for (var i = 0; i < app.notamCache[destCode].notams.length; i++) {
+        var n = app.notamCache[destCode].notams[i];
+        destNotams.push({ id: n.id, text: n.text });
+      }
+    }
+
+    // En-route weather samples from OWM cache
+    var enroute = [];
+    for (var i = 0; i < routeOwmSamples.length; i++) {
+      var s = routeOwmSamples[i];
+      var key = owmCacheKey(s.lat, s.lon);
+      var c = routeOwmCache[key];
+      if (c && c.data) {
+        var d = c.data;
+        enroute.push({
+          lat: s.lat,
+          lon: s.lon,
+          weather: d.weather && d.weather[0] ? d.weather[0].main : null,
+          windDir: d.wind ? Math.round(d.wind.deg || 0) : null,
+          windSpd: d.wind ? Math.round(d.wind.speed * 1.944) : null,
+          temp: d.main ? Math.round(d.main.temp) : null,
+          vis: d.visibility != null ? d.visibility : null
+        });
+      }
+    }
+
+    // Build FL compare and airgram data if available
+    var flCompare = null;
+    var airgramSummary = null;
+    var profile = getProfile();
+    var samples = buildRouteAirgramSamples();
+    var airgramCache = app.routeAirgramCache;
+
+    if (profile && samples.length > 0 && airgramCache && airgramCache.responses
+        && airgramCache.samples === samples.map(function(s) { return s.lat + ',' + s.lon; }).join('|')
+        && (Date.now() - airgramCache.timestamp) < 600000) {
+      var responses = airgramCache.responses;
+      var LEVELS = app.AIRGRAM_LEVELS;
+      var nLevels = LEVELS.length;
+      var nPoints = samples.length;
+      var stdHts = [111, 762, 1457, 2164, 3012, 4206, 5574, 6344];
+
+      // Build grid
+      var grid = [];
+      for (var li = 0; li < nLevels; li++) {
+        grid[li] = [];
+        var lev = LEVELS[li];
+        var wsKey = 'wind_speed_' + lev + 'hPa';
+        var wdKey = 'wind_direction_' + lev + 'hPa';
+        var ghKey = 'geopotential_height_' + lev + 'hPa';
+        var tKey = 'temperature_' + lev + 'hPa';
+        var ccKey = 'cloud_cover_' + lev + 'hPa';
+        for (var pi = 0; pi < nPoints; pi++) {
+          var resp = responses[pi];
+          var hourly = resp && resp.hourly;
+          if (!hourly || !hourly.time) {
+            grid[li][pi] = { windSpd: null, windDir: null, geoHt: stdHts[li], temp: null, cloud: null };
+            continue;
+          }
+          var hi = 0;
+          if (samples[pi].etaEpoch) {
+            var etaMs = samples[pi].etaEpoch * 1000;
+            var bestDiff = Infinity;
+            for (var h = 0; h < hourly.time.length; h++) {
+              var tMs = new Date(hourly.time[h]).getTime();
+              var diff = Math.abs(tMs - etaMs);
+              if (diff < bestDiff) { bestDiff = diff; hi = h; }
+            }
+          }
+          grid[li][pi] = {
+            windSpd: hourly[wsKey] ? hourly[wsKey][hi] : null,
+            windDir: hourly[wdKey] ? hourly[wdKey][hi] : null,
+            geoHt: hourly[ghKey] ? hourly[ghKey][hi] : stdHts[li],
+            temp: hourly[tKey] ? hourly[tKey][hi] : null,
+            cloud: hourly[ccKey] ? hourly[ccKey][hi] : null
+          };
+        }
+      }
+
+      // Average geopotential heights
+      var avgGeoHt = [];
+      for (var li = 0; li < nLevels; li++) {
+        var sum = 0, cnt = 0;
+        for (var pi = 0; pi < nPoints; pi++) {
+          if (grid[li][pi].geoHt != null) { sum += grid[li][pi].geoHt; cnt++; }
+        }
+        avgGeoHt[li] = cnt > 0 ? sum / cnt : stdHts[li];
+      }
+
+      // Airgram summary: average conditions at each pressure level
+      airgramSummary = [];
+      for (var li = 0; li < nLevels; li++) {
+        var ws = 0, wd = 0, tp = 0, cc = 0, cnt = 0;
+        for (var pi = 0; pi < nPoints; pi++) {
+          var g = grid[li][pi];
+          if (g.windSpd != null) { ws += g.windSpd; wd += g.windDir || 0; tp += g.temp || 0; cc += g.cloud || 0; cnt++; }
+        }
+        if (cnt > 0) {
+          airgramSummary.push({
+            level: LEVELS[li],
+            altFt: Math.round(avgGeoHt[li] * 3.281),
+            windSpd: Math.round(ws / cnt),
+            windDir: Math.round(wd / cnt),
+            temp: Math.round(tp / cnt),
+            cloud: Math.round(cc / cnt)
+          });
+        }
+      }
+
+      // FL compare: compute for FL10-FL200
+      var cumDist = [0];
+      for (var i = 0; i < legs.length; i++) cumDist.push(cumDist[i] + legs[i].dist);
+      var legBearings = [];
+      for (var i = 0; i < legs.length; i++) legBearings.push(legs[i].trueHdg);
+      var sampleLeg = [];
+      for (var pi = 0; pi < nPoints; pi++) {
+        var d = samples[pi].dist;
+        var sli = 0;
+        for (var j = 0; j < legs.length; j++) {
+          if (d >= cumDist[j] && d <= cumDist[j + 1] + 0.01) { sli = j; break; }
+        }
+        sampleLeg[pi] = sli;
+      }
+
+      var maxLeg = (alternateIndex >= 0) ? alternateIndex - 1 : legs.length;
+
+      function briefInterpWind(pi, targetM) {
+        for (var li = 0; li < nLevels - 1; li++) {
+          var h0 = avgGeoHt[li], h1 = avgGeoHt[li + 1];
+          if (targetM >= h0 && targetM <= h1) {
+            var frac = (targetM - h0) / (h1 - h0);
+            var s0 = grid[li][pi].windSpd, s1 = grid[li + 1][pi].windSpd;
+            var d0 = grid[li][pi].windDir, d1 = grid[li + 1][pi].windDir;
+            var spd = (s0 != null && s1 != null) ? s0 + frac * (s1 - s0) : null;
+            var dir = (d0 != null && d1 != null) ? interpAngle(d0, d1, frac) : null;
+            return { spd: spd, dir: dir };
+          }
+        }
+        if (targetM <= avgGeoHt[0]) return { spd: grid[0][pi].windSpd, dir: grid[0][pi].windDir };
+        if (targetM >= avgGeoHt[nLevels - 1]) return { spd: grid[nLevels - 1][pi].windSpd, dir: grid[nLevels - 1][pi].windDir };
+        return { spd: null, dir: null };
+      }
+
+      function briefComputeFL(testFL) {
+        var altM = testFL * 100 * 0.3048;
+        var totalTime = 0, totalFuel = 0, avgHW = 0, hwCount = 0;
+        for (var legI = 0; legI < maxLeg; legI++) {
+          var legDist = legs[legI].dist;
+          var track = legBearings[legI];
+          var hwSum = 0, hwN = 0;
+          for (var pi = 0; pi < nPoints; pi++) {
+            if (sampleLeg[pi] === legI) {
+              var w = briefInterpWind(pi, altM);
+              if (w.spd != null && w.dir != null) {
+                hwSum += w.spd * Math.cos((w.dir - track) * Math.PI / 180);
+                hwN++;
+              }
+            }
+          }
+          var legHW = hwN > 0 ? hwSum / hwN : 0;
+          avgHW += legHW * legDist;
+          hwCount += legDist;
+          var gs = Math.max(50, profile.tas - legHW);
+          totalTime += legDist / gs;
+          totalFuel += (legDist / gs) * profile.burn;
+        }
+        return { time: totalTime, fuel: totalFuel, avgHW: hwCount > 0 ? avgHW / hwCount : 0 };
+      }
+
+      var selResult = briefComputeFL(fl);
+      flCompare = [];
+      for (var flIdx = 0; flIdx < 20; flIdx++) {
+        var testFL = (flIdx + 1) * 10;
+        var r = (testFL === fl) ? selResult : briefComputeFL(testFL);
+        flCompare.push({
+          fl: testFL,
+          timeH: +r.time.toFixed(2),
+          fuelGal: +r.fuel.toFixed(1),
+          hwKt: Math.round(r.avgHW)
+        });
+      }
+    }
+
+    app.streamBriefing(el, {
+      type: 'route',
+      data: {
+        waypoints: wpData,
+        legs: legData,
+        flightLevel: fl,
+        departureTime: depTime,
+        departure: { metar: depMetar, taf: depTaf, notams: depNotams },
+        enroute: enroute,
+        destination: { taf: destTaf, notams: destNotams },
+        airgramSummary: airgramSummary,
+        flCompare: flCompare
+      }
+    });
   }
 
   function loadRouteGramet() {
@@ -1445,6 +2109,12 @@
     var app = window.AirportApp;
     if (app.fetchRouteAirgramInto) {
       app.fetchRouteAirgramInto(el, samples);
+    }
+    // Also extract overlay data for route map
+    if (app.fetchRouteAirgramData) {
+      app.fetchRouteAirgramData(samples, function (responses) {
+        if (responses) extractRouteWxOverlay(responses, samples);
+      });
     }
   }
 
@@ -1805,6 +2475,13 @@
       windLine = '<p class="wind-adj">' + esc(windEl.textContent.trim()) + '</p>';
     }
 
+    // Icing warning (read from DOM if available)
+    var icingLine = '';
+    var icingEl = document.getElementById('route-icing-warning');
+    if (icingEl && icingEl.innerHTML.trim()) {
+      icingLine = icingEl.innerHTML;
+    }
+
     // W&B section — include input parameters
     var wbHtml = '';
     var wbResults = document.getElementById('wb-results');
@@ -1981,6 +2658,7 @@
         + '<tfoot>' + totalsHtml + '</tfoot>'
         + '</table>'
         + windLine
+        + icingLine
         + '</div>'
         + wbHtml
         + wxHtml
@@ -2091,6 +2769,72 @@
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
   function esc(s) { return escapeHtml(s); }
+
+  // SVG wind barb: returns <g> content centered at (0,0), rotated by wind direction
+  function svgWindBarb(speedKt, dirDeg, size, color) {
+    var c = color || '#334';
+    if (speedKt < 3) {
+      // Calm: concentric circles
+      var cr = size * 0.15;
+      return '<circle cx="0" cy="0" r="' + r(cr * 2) + '" fill="none" stroke="' + c + '" stroke-width="1.5"/>'
+        + '<circle cx="0" cy="0" r="' + r(cr * 0.7) + '" fill="' + c + '"/>';
+    }
+    var half = size / 2;
+    var staffTop = -half;
+    var staffBot = half * 0.6;
+    var barbLen = size * 0.4;
+    var barbHalf = barbLen * 0.5;
+    var penH = size * 0.15;
+
+    var parts = [];
+    var remaining = Math.round(speedKt / 5) * 5;
+    var y = staffTop;
+
+    // Pennants (50 kt)
+    while (remaining >= 50) {
+      parts.push('<polygon points="0,' + r(y) + ' ' + r(barbLen) + ',' + r(y + penH * 0.4) + ' 0,' + r(y + penH) + '" fill="' + c + '"/>');
+      y += penH + 1;
+      remaining -= 50;
+    }
+    // Full barbs (10 kt)
+    while (remaining >= 10) {
+      parts.push('<line x1="0" y1="' + r(y) + '" x2="' + r(barbLen) + '" y2="' + r(y - penH * 0.6) + '" stroke="' + c + '" stroke-width="1.5" stroke-linecap="round"/>');
+      y += size * 0.12;
+      remaining -= 10;
+    }
+    // Half barb (5 kt)
+    if (remaining >= 5) {
+      parts.push('<line x1="0" y1="' + r(y) + '" x2="' + r(barbHalf) + '" y2="' + r(y - penH * 0.4) + '" stroke="' + c + '" stroke-width="1.5" stroke-linecap="round"/>');
+    }
+
+    // Staff + dot at station end
+    return '<g transform="rotate(' + r(dirDeg) + ' 0 0)">'
+      + '<line x1="0" y1="' + r(staffTop) + '" x2="0" y2="' + r(staffBot) + '" stroke="' + c + '" stroke-width="1.5" stroke-linecap="round"/>'
+      + '<circle cx="0" cy="' + r(staffBot) + '" r="2" fill="' + c + '"/>'
+      + parts.join('')
+      + '</g>';
+  }
+
+  // SVG cloud cover circle: returns elements for oktas-style symbol
+  function svgCloudCircle(coverPct, cr) {
+    var outline = '<circle cx="0" cy="0" r="' + cr + '" fill="#fff" stroke="#334" stroke-width="1.2"/>';
+    if (coverPct <= 12) return outline; // CLR
+    if (coverPct >= 88) {
+      // OVC: filled circle
+      return '<circle cx="0" cy="0" r="' + cr + '" fill="#334" stroke="#334" stroke-width="1.2"/>';
+    }
+    // Partial fill using arc
+    var fillFrac = coverPct / 100;
+    // Draw as a pie slice from top
+    var angle = fillFrac * 2 * Math.PI;
+    var startX = 0, startY = -cr;
+    var endX = cr * Math.sin(angle);
+    var endY = -cr * Math.cos(angle);
+    var largeArc = angle > Math.PI ? 1 : 0;
+    var path = 'M0,0 L' + r(startX) + ',' + r(startY)
+      + ' A' + cr + ',' + cr + ' 0 ' + largeArc + ',1 ' + r(endX) + ',' + r(endY) + ' Z';
+    return outline + '<path d="' + path + '" fill="#334"/>';
+  }
 
   function buildRouteMapSvg() {
     if (waypoints.length < 2) return '';
@@ -2222,6 +2966,58 @@
         + esc(label) + (isAlt ? ' (ALT)' : '') + '</text>';
     }
 
+    // Wind barbs and cloud symbols from weather overlay
+    if (routeWxOverlay.length > 0) {
+      // Collect waypoint pixel positions to avoid overlap
+      var wpPixels = [];
+      for (var i = 0; i < waypoints.length; i++) {
+        wpPixels.push({ x: px(waypoints[i].latlng.lng), y: py(waypoints[i].latlng.lat) });
+      }
+      // Skip every other sample if too many (> 12)
+      var step = routeWxOverlay.length > 12 ? 2 : 1;
+      var barbSize = 24;
+      var cloudR = 5;
+      var svgOff = 20; // pixel offset perpendicular to route
+      for (var i = 0; i < routeWxOverlay.length; i += step) {
+        var ow = routeWxOverlay[i];
+        var bx = px(ow.lon);
+        var by = py(ow.lat);
+        // Offset perpendicular to route (90° to the right in screen coords)
+        var brgRad = ((ow.routeBrg || 0)) * Math.PI / 180;
+        // Screen Y is inverted (north=up=smaller Y), so perpendicular right = (sin, -cos) rotated
+        bx += svgOff * Math.sin(brgRad + Math.PI / 2);
+        by -= svgOff * Math.cos(brgRad + Math.PI / 2);
+        // Skip if too close to a waypoint dot
+        var tooClose = false;
+        for (var w = 0; w < wpPixels.length; w++) {
+          var dx = bx - wpPixels[w].x, dy = by - wpPixels[w].y;
+          if (Math.sqrt(dx * dx + dy * dy) < 18) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+        // Wind barb (blue for icing)
+        var barbCol = ow.icing ? '#2980b9' : undefined;
+        svg += '<g transform="translate(' + r(bx) + ',' + r(by) + ')" opacity="0.75">'
+          + svgWindBarb(ow.windSpd, ow.windDir, barbSize, barbCol) + '</g>';
+        // Cloud circle offset to the right of barb
+        if (ow.cloud != null) {
+          var cloudOffX = barbSize * 0.55;
+          svg += '<g transform="translate(' + r(bx + cloudOffX) + ',' + r(by) + ')" opacity="0.75">'
+            + svgCloudCircle(ow.cloud, cloudR) + '</g>';
+        }
+        // Ice crystal for icing points
+        if (ow.icing) {
+          var iceX = ow.cloud != null ? bx + cloudOffX + cloudR + 6 : bx + barbSize * 0.55;
+          var iceY = by;
+          svg += '<g transform="translate(' + r(iceX) + ',' + r(iceY) + ')" opacity="0.8">'
+            + '<line x1="0" y1="-5" x2="0" y2="5" stroke="#2980b9" stroke-width="1.3"/>'
+            + '<line x1="-5" y1="0" x2="5" y2="0" stroke="#2980b9" stroke-width="1.3"/>'
+            + '<line x1="-3.5" y1="-3.5" x2="3.5" y2="3.5" stroke="#2980b9" stroke-width="1"/>'
+            + '<line x1="3.5" y1="-3.5" x2="-3.5" y2="3.5" stroke="#2980b9" stroke-width="1"/>'
+            + '</g>';
+        }
+      }
+    }
+
     svg += '</svg>';
 
     return '<div class="section first route-map-section">'
@@ -2266,6 +3062,7 @@
       + 'tr.totals-req td { border-top: 1px solid #aaa; }'
       + '.warn { color: #c0392b; font-weight: 700; }'
       + '.wind-adj { font-size: 10px; margin-top: 4px; color: #555; }'
+      + '.route-icing-warning { color: #2980b9; font-weight: 700; margin-top: 4px; padding: 4px 6px; background: #d6eaf8; border-radius: 4px; font-size: 10px; line-height: 1.4; }'
       + '.wb-loading { border-collapse: collapse; font-size: 10px; margin-bottom: 8px; }'
       + '.wb-loading th { background: #f0f0f0; font-weight: 700; text-align: left; padding: 2px 8px; border: 1px solid #bbb; }'
       + '.wb-loading td { padding: 2px 8px; border: 1px solid #ddd; }'
@@ -2906,6 +3703,8 @@
     routeWxCache = {};
     routeOwmCache = {};
     routeOwmSamples = [];
+    routeWxOverlay = [];
+    if (routeWxMarkers) routeWxMarkers.clearLayers();
     if (routeLayerGroup) routeLayerGroup.clearLayers();
 
     var app = window.AirportApp;
@@ -2975,6 +3774,7 @@
     if (!map) return;
 
     routeLayerGroup = L.layerGroup().addTo(map);
+    routeWxMarkers = L.layerGroup().addTo(map);
 
     toggleBtn = document.getElementById('route-toggle');
     settingsDiv = document.getElementById('route-settings');
@@ -2994,6 +3794,19 @@
 
     setupTabs();
     setupRouteWxPanel();
+
+    // Wx overlay toggle
+    var wxShowCb = document.getElementById('route-wx-show');
+    if (wxShowCb) {
+      wxShowCb.addEventListener('change', function () {
+        if (wxShowCb.checked) {
+          if (routeWxMarkers && !map.hasLayer(routeWxMarkers)) map.addLayer(routeWxMarkers);
+          renderRouteWxOnMap();
+        } else {
+          if (routeWxMarkers && map.hasLayer(routeWxMarkers)) map.removeLayer(routeWxMarkers);
+        }
+      });
+    }
 
     // Fetch autorouter aircraft ID (DA62)
     fetchAircraftId();
@@ -3089,6 +3902,8 @@
     routeWxCache = {};
     routeOwmCache = {};
     routeOwmSamples = [];
+    routeWxOverlay = [];
+    if (routeWxMarkers) routeWxMarkers.clearLayers();
     if (routeLayerGroup) routeLayerGroup.clearLayers();
 
     for (var i = 0; i < state.waypoints.length; i++) {

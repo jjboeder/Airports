@@ -40,6 +40,7 @@
       <button class="route-wx-panel-tab active" data-rwtab="rw-airgram">Airgram</button>
       <button class="route-wx-panel-tab" data-rwtab="rw-gramet">GRAMET</button>
       <button class="route-wx-panel-tab" data-rwtab="rw-flcomp">FL Compare</button>
+      <button class="route-wx-panel-tab" data-rwtab="rw-briefing">Briefing</button>
       <span style="flex:1"></span>
       <button class="route-wx-panel-close">&times;</button>
     </div>
@@ -47,6 +48,7 @@
       <div id="rw-airgram" class="route-wx-panel-content"></div>
       <div id="rw-gramet" class="route-wx-panel-content" style="display:none;"></div>
       <div id="rw-flcomp" class="route-wx-panel-content" style="display:none;"></div>
+      <div id="rw-briefing" class="route-wx-panel-content" style="display:none;"></div>
     </div>
   </div>
 
@@ -84,6 +86,10 @@
       <span class="legend-dot" style="background:#27ae60; width:6px; height:6px;"></span>
       Small airport
     </div>
+    <div class="legend-item">
+      <input type="checkbox" id="rwy-filter-toggle" checked>
+      <label for="rwy-filter-toggle" style="font-size:11px;color:#444;cursor:pointer;margin:0;">Hide short/unpaved runways</label>
+    </div>
     <h3 class="legend-section">METAR Layer</h3>
     <div class="legend-item">
       <input type="checkbox" id="wx-filter-toggle">
@@ -108,6 +114,9 @@
     <div class="legend-item">
       <span style="color:#9b59b6;font-weight:700;font-family:monospace;font-size:11px;width:38px;display:inline-block;">LIFR</span>
       &lt;500 ft / &lt;1.5 km
+    </div>
+    <div class="legend-item" style="margin-top:8px;border-top:1px solid #e0e0e0;padding-top:8px;">
+      <a href="docs/user-manual.html" target="_blank" rel="noopener" style="font-size:11px;color:#2980b9;text-decoration:none;">User Manual</a>
     </div>
   </div>
 
@@ -146,6 +155,7 @@
         <input type="text" id="route-dep-time" maxlength="5" placeholder="HH:MM" pattern="\d{2}:\d{2}">
         <label for="route-fl">FL</label>
         <input type="number" id="route-fl" value="80" min="10" max="250" step="10">
+        <label class="route-wx-toggle" title="Show wind barbs along route"><input type="checkbox" id="route-wx-show" checked>Wx</label>
         <button id="auto-route-btn" class="route-btn route-btn-auto" title="Find IFR route via autorouter">Auto Route (IFR)</button>
       </div>
       <div id="route-waypoints"></div>

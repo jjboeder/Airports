@@ -337,10 +337,14 @@ html, body {
   margin-bottom: 4px;
 }
 
+.metar-chips {
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
 .metar-raw {
   font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
   font-size: 11px;
-  color: #333;
+  color: #555;
   word-break: break-all;
   line-height: 1.4;
   margin: 4px 0;
@@ -496,7 +500,7 @@ html, body {
 .popup-links {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   margin: 8px 0;
   padding: 8px 0;
   border-top: 1px solid #e0e0e0;
@@ -547,6 +551,12 @@ html, body {
   background: #f3e5f5;
   color: #6a1b9a;
   border: 1px solid #ab47bc;
+}
+
+.lp-link {
+  background: #e3f2fd;
+  color: #0d47a1;
+  border: 1px solid #42a5f5;
 }
 
 /* Charts toggle link */
@@ -1208,6 +1218,16 @@ html, body {
   font-size: 12px;
   line-height: 1.4;
 }
+.route-icing-warning {
+  color: #2980b9;
+  font-weight: 700;
+  margin-top: 4px;
+  padding: 4px 6px;
+  background: #d6eaf8;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
 
 /* Route map markers */
 .route-number-marker {
@@ -1370,6 +1390,18 @@ html, body {
   text-align: right;
 }
 
+.route-wx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  margin-left: 2px;
+}
+.route-wx-toggle input { margin: 0; }
+
 /* Route weather badge inline with waypoint */
 .route-wp-wx {
   display: inline-block;
@@ -1473,11 +1505,14 @@ html, body {
 
 .notam-header {
   font-size: 12px;
-  color: #856404;
+  color: #e67e22;
   margin-bottom: 4px;
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.notam-header-critical {
+  color: #e74c3c;
 }
 
 .notam-list {
@@ -1547,6 +1582,9 @@ html, body {
   color: #e67e22;
   vertical-align: middle;
   margin-left: 4px;
+}
+.notam-warning-critical {
+  color: #e74c3c;
 }
 .notam-warning .notam-svg {
   width: 16px;
@@ -1890,8 +1928,8 @@ html, body {
   position: fixed;
   bottom: 30px;
   right: 300px;
-  width: 540px;
-  max-height: 80vh;
+  width: 720px;
+  max-height: 92vh;
   z-index: 2000;
   background: rgba(255,255,255,0.97);
   border-radius: 8px;
@@ -1953,6 +1991,51 @@ html, body {
   /* shown/hidden via display:none */
 }
 
+/* AI Briefing content */
+.briefing-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #333;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  padding: 4px 0;
+  min-height: 40px;
+}
+
+.briefing-content h4.briefing-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2980b9;
+  margin: 10px 0 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.briefing-content h4.briefing-heading:first-child {
+  margin-top: 0;
+}
+
+.briefing-content h5.briefing-subheading {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin: 6px 0 2px 0;
+}
+
+.briefing-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background: #2980b9;
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: briefing-blink 0.7s step-end infinite;
+}
+
+@keyframes briefing-blink {
+  50% { opacity: 0; }
+}
+
 /* Route panel weather/gramet buttons */
 .route-wx-btns {
   display: flex;
@@ -1990,6 +2073,17 @@ html, body {
 .airgram-legend { display: flex; gap: 8px; font-size: 10px; color: #555; margin-top: 4px; align-items: center; flex-wrap: wrap; }
 .airgram-legend-item { display: flex; align-items: center; gap: 3px; }
 .airgram-legend-swatch { width: 14px; height: 10px; border-radius: 2px; border: 1px solid #ccc; }
+.airgram-legend-icing {
+  background: rgba(41,128,185,0.18);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 2px,
+    rgba(41,128,185,0.35) 2px,
+    rgba(41,128,185,0.35) 3px
+  );
+  border-color: rgba(41,128,185,0.5);
+}
 .airgram-tip { position: absolute; pointer-events: none; background: rgba(0,0,0,0.8); color: #fff; font-size: 11px; padding: 3px 7px; border-radius: 4px; white-space: nowrap; z-index: 10; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
 
 /* Wind-adjusted totals in route list */
@@ -2164,4 +2258,20 @@ html, body {
   line-height: 1;
   margin-top: -2px;
   pointer-events: none;
+}
+
+/* Route weather barb markers on map */
+.route-wx-barb-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  opacity: 0.8;
+}
+.route-wx-barb-icon .wind-barb-label {
+  font-size: 9px;
+}
+.route-wx-barb-row {
+  display: flex;
+  align-items: center;
+  gap: 1px;
 }
