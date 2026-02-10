@@ -2289,3 +2289,55 @@ html, body {
   align-items: center;
   gap: 1px;
 }
+
+/* SIGMET popup */
+.sigmet-popup {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sigmet-hazard-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 3px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.sigmet-alt {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  margin: 4px 0;
+}
+
+.sigmet-valid {
+  font-size: 11px;
+  color: #666;
+  margin: 2px 0;
+}
+
+.sigmet-fir {
+  font-size: 11px;
+  color: #888;
+  margin: 2px 0;
+}
+
+.sigmet-raw {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 10px;
+  color: #444;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  max-height: 120px;
+  overflow-y: auto;
+}

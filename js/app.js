@@ -244,6 +244,121 @@
     });
   }
 
+  // --- SIGMET overlay ---
+  var SIGMET_COLORS = {
+    TS: '#e74c3c',
+    CONVECTIVE: '#e74c3c',
+    TURB: '#e67e22',
+    ICE: '#2980b9',
+    VA: '#8e44ad',
+    MTW: '#795548',
+    DEFAULT: '#888'
+  };
+
+  function sigmetColor(hazard) {
+    if (!hazard) return SIGMET_COLORS.DEFAULT;
+    var h = hazard.toUpperCase();
+    return SIGMET_COLORS[h] || SIGMET_COLORS.DEFAULT;
+  }
+
+  function sigmetPopupHtml(props) {
+    var hazard = props.hazard || 'Unknown';
+    var qualifier = props.qualifier ? ' (' + props.qualifier + ')' : '';
+    var color = sigmetColor(hazard);
+
+    var html = '<div class="sigmet-popup">';
+    html += '<span class="sigmet-hazard-badge" style="background:' + color + ';">' + hazard + qualifier + '</span>';
+
+    if (props.base != null || props.top != null) {
+      var base = props.base != null ? 'FL' + Math.round(props.base / 100) : 'SFC';
+      var top = props.top != null ? 'FL' + Math.round(props.top / 100) : '???';
+      html += '<div class="sigmet-alt">' + base + ' \u2013 ' + top + '</div>';
+    }
+
+    if (props.validTimeFrom || props.validTimeTo) {
+      var from = props.validTimeFrom ? new Date(props.validTimeFrom).toISOString().slice(11, 16) + 'Z' : '?';
+      var to = props.validTimeTo ? new Date(props.validTimeTo).toISOString().slice(11, 16) + 'Z' : '?';
+      html += '<div class="sigmet-valid">Valid ' + from + ' \u2013 ' + to + '</div>';
+    }
+
+    if (props.firName) {
+      html += '<div class="sigmet-fir">FIR: ' + props.firName + '</div>';
+    }
+
+    if (props.rawSigmet) {
+      html += '<pre class="sigmet-raw">' + props.rawSigmet + '</pre>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function setupSigmetLayer(layerGroup) {
+    function loadSigmets() {
+      fetch(OWM_PROXY + '/sigmet')
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (geojson) {
+          layerGroup.clearLayers();
+          if (!geojson || !geojson.features) return;
+
+          var now = Date.now();
+
+          L.geoJSON(geojson, {
+            filter: function (feature) {
+              var p = feature.properties || {};
+              // Filter to currently valid
+              if (p.validTimeTo && new Date(p.validTimeTo).getTime() < now) return false;
+              // Filter to European bbox (lat 30-72, lon -25 to 45)
+              var geom = feature.geometry;
+              if (!geom || !geom.coordinates) return false;
+              var coords = JSON.stringify(geom.coordinates);
+              // Quick bbox check: extract all numbers and check if any lon/lat falls in Europe
+              // For polygons, check the first coordinate pair
+              try {
+                var ring = geom.type === 'Polygon' ? geom.coordinates[0] : (geom.type === 'MultiPolygon' ? geom.coordinates[0][0] : null);
+                if (!ring) return false;
+                var inEurope = false;
+                for (var i = 0; i < ring.length; i++) {
+                  var lon = ring[i][0], lat = ring[i][1];
+                  if (lat >= 30 && lat <= 72 && lon >= -25 && lon <= 45) {
+                    inEurope = true;
+                    break;
+                  }
+                }
+                return inEurope;
+              } catch (e) { return false; }
+            },
+            style: function (feature) {
+              var color = sigmetColor(feature.properties && feature.properties.hazard);
+              return {
+                color: color,
+                weight: 2,
+                opacity: 0.8,
+                fillColor: color,
+                fillOpacity: 0.2
+              };
+            },
+            onEachFeature: function (feature, layer) {
+              layer.bindPopup(sigmetPopupHtml(feature.properties || {}), {
+                maxWidth: 500,
+                minWidth: 360,
+                className: 'sigmet-popup-wrapper'
+              });
+            }
+          }).addTo(layerGroup);
+        })
+        .catch(function (err) {
+          console.error('SIGMET load error:', err);
+        });
+    }
+
+    loadSigmets();
+    setInterval(loadSigmets, 300000); // refresh every 5 minutes
+  }
+
   function setupLayerControl() {
     const overlays = {};
 
@@ -265,6 +380,11 @@
     overlays['AMA Grid'] = amaLayer;
     overlays['Obstacles'] = obsLayer;
     loadAMAGrid(amaLayer, obsLayer);
+
+    // SIGMET overlay
+    var sigmetLayer = L.layerGroup();
+    overlays['SIGMETs'] = sigmetLayer;
+    setupSigmetLayer(sigmetLayer);
 
     // Airport layers will be added by airports.js via window.AirportApp
     window.AirportApp = window.AirportApp || {};

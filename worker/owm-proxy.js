@@ -587,6 +587,28 @@ NOTAMs: ${d.destination && d.destination.notams && d.destination.notams.length >
       }
     }
 
+    // Route: /sigmet (international SIGMETs as GeoJSON)
+    if (path === '/sigmet') {
+      const cache = caches.default;
+      const cacheKey = new Request('https://sigmet-cache/isigmet');
+      let cached = await cache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+      const upstream = 'https://aviationweather.gov/api/data/isigmet?format=geojson';
+      const resp = await fetch(upstream);
+      const body = await resp.text();
+      const cacheResp = new Response(body, {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=300' }
+      });
+      await cache.put(cacheKey, cacheResp.clone());
+      const headers = new Headers(cacheResp.headers);
+      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+      return new Response(body, { status: 200, headers });
+    }
+
     return new Response('Not found', { status: 404, headers: corsHeaders(request) });
   }
 };
