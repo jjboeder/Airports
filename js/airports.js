@@ -6,8 +6,8 @@
   // Airport type configuration: color and marker size
   var TYPE_CONFIG = {
     'large_airport':   { color: '#e74c3c', size: 12, label: 'Large airports', fontSize: 12, minZoom: 0 },
-    'medium_airport':  { color: '#3498db', size: 9,  label: 'Medium airports', fontSize: 11, minZoom: 6 },
-    'small_airport':   { color: '#27ae60', size: 6,  label: 'Small airports', fontSize: 10, minZoom: 8 }
+    'medium_airport':  { color: '#3498db', size: 12, label: 'Medium airports', fontSize: 12, minZoom: 6 },
+    'small_airport':   { color: '#27ae60', size: 12, label: 'Small airports', fontSize: 12, minZoom: 8 }
   };
 
   // Column indices in the array-of-arrays data format
@@ -1582,9 +1582,28 @@
                       });
                     }
 
-                    var hasData = (metarCache[bIcao] && metarCache[bIcao].rawOb) || rawTafCache[bIcao] || tafCache[bIcao];
-                    if (hasData) {
+                    var hasTaf = rawTafCache[bIcao] || tafCache[bIcao];
+                    var hasMetar = metarCache[bIcao] && metarCache[bIcao].rawOb;
+
+                    function fetchTafThenBrief() {
+                      bDiv.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
+                      fetch(TAF_API + '?ids=' + encodeURIComponent(bIcao))
+                        .then(function (res) { return res.ok ? res.json() : Promise.reject(); })
+                        .then(function (json) {
+                          if (json && json.length && json[0].rawTAF) {
+                            rawTafCache[bIcao] = json[0].rawTAF;
+                            tafCache[bIcao] = json;
+                            tafCacheTime[bIcao] = Date.now();
+                          }
+                          streamAirportBriefing();
+                        })
+                        .catch(function () { streamAirportBriefing(); });
+                    }
+
+                    if (hasMetar && hasTaf) {
                       streamAirportBriefing();
+                    } else if (hasMetar && !hasTaf) {
+                      fetchTafThenBrief();
                     } else {
                       bDiv.innerHTML = '<span class="metar-loading">Loading weather data...</span>';
                       fetch(AR_METARTAF_API + encodeURIComponent(bIcao))
@@ -1594,9 +1613,19 @@
                             var m = parseMetar(json.metar);
                             if (m) { metarCache[bIcao] = m; metarCacheTime[bIcao] = Date.now(); }
                           }
-                          if (json.taf) rawTafCache[bIcao] = json.taf;
-                          streamAirportBriefing();
+                          if (json.taf) { rawTafCache[bIcao] = json.taf; return; }
+                          // Combo didn't return TAF, try dedicated TAF endpoint
+                          return fetch(TAF_API + '?ids=' + encodeURIComponent(bIcao))
+                            .then(function (res) { return res.ok ? res.json() : null; })
+                            .then(function (tJson) {
+                              if (tJson && tJson.length && tJson[0].rawTAF) {
+                                rawTafCache[bIcao] = tJson[0].rawTAF;
+                                tafCache[bIcao] = tJson;
+                                tafCacheTime[bIcao] = Date.now();
+                              }
+                            });
                         })
+                        .then(function () { streamAirportBriefing(); })
                         .catch(function () {
                           bDiv.innerHTML = '<div class="briefing-content">Could not load weather data for briefing.</div>';
                         });

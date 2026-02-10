@@ -1095,6 +1095,47 @@
       // Icing warning placeholder (populated asynchronously alongside wind totals)
       thtml += '<div id="route-icing-warning"></div>';
 
+      // Weather below BIR warning for departure and destination
+      if (depEpoch && waypoints.length >= 2) {
+        var wxWarnings = [];
+        var depCode = waypoints[0].code;
+        var destIdx = (alternateIndex >= 0) ? alternateIndex - 1 : waypoints.length - 1;
+        var destCode = waypoints[destIdx].code;
+        var arrEpoch = depEpoch + cumTime[destIdx] * 3600;
+
+        var depTaf = routeWxCache[depCode] || (app.tafCache && app.tafCache[depCode]);
+        if (depTaf) {
+          var depR = tafCategoryAtEpoch(depTaf, depEpoch);
+          var depCat = depR ? depR.cat : null;
+          if (depCat && CAT_ORDER.indexOf(depCat) > CAT_ORDER.indexOf('BIR')) {
+            var catInfo = METAR_CAT[depCat] || {};
+            wxWarnings.push('<span style="color:' + (catInfo.color || '#e74c3c') + '">' + escapeHtml(depCode) + ' departure: ' + depCat + '</span>');
+          }
+        }
+
+        if (destCode !== depCode || arrEpoch !== depEpoch) {
+          // Check arrival time and +1h; only check -1h if it's after departure
+          var destTaf = routeWxCache[destCode] || (app.tafCache && app.tafCache[destCode]);
+          if (destTaf) {
+            var dr0 = tafCategoryAtEpoch(destTaf, arrEpoch);
+            var dr2 = tafCategoryAtEpoch(destTaf, arrEpoch + 3600);
+            var destCat = worstCategory(dr0 ? dr0.cat : null, dr2 ? dr2.cat : null);
+            if (arrEpoch - 3600 >= depEpoch) {
+              var dr1 = tafCategoryAtEpoch(destTaf, arrEpoch - 3600);
+              destCat = worstCategory(destCat, dr1 ? dr1.cat : null);
+            }
+            if (destCat && CAT_ORDER.indexOf(destCat) > CAT_ORDER.indexOf('BIR')) {
+              var catInfo = METAR_CAT[destCat] || {};
+              wxWarnings.push('<span style="color:' + (catInfo.color || '#e74c3c') + '">' + escapeHtml(destCode) + ' arrival: ' + destCat + '</span>');
+            }
+          }
+        }
+
+        if (wxWarnings.length > 0) {
+          thtml += '<div class="route-wx-warning">&#9888; Below BIR minimums: ' + wxWarnings.join(', ') + '</div>';
+        }
+      }
+
       // Action buttons
       if (waypoints.length >= 2) {
         thtml += '<div class="route-wx-btns">';

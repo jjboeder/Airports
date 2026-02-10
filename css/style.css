@@ -1218,6 +1218,15 @@ html, body {
   font-size: 12px;
   line-height: 1.4;
 }
+.route-wx-warning {
+  font-weight: 700;
+  margin-top: 4px;
+  padding: 4px 6px;
+  background: #fdecea;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
 .route-icing-warning {
   color: #2980b9;
   font-weight: 700;
@@ -1989,6 +1998,11 @@ html, body {
 
 .route-wx-panel-content {
   /* shown/hidden via display:none */
+}
+
+.popup-briefing {
+  max-height: 270px;
+  overflow-y: auto;
 }
 
 /* AI Briefing content */

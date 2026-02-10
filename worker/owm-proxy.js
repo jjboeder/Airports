@@ -487,7 +487,6 @@ Format your briefing with these sections (use ## headings):
 ## Current Conditions (for airport briefings) or ## Departure (for route briefings)
 ## Forecast
 ## En-Route Weather (route briefings only)
-## Winds Aloft (route briefings only, if airgram data provided)
 ## Destination (route briefings only)
 ## NOTAMs (if any provided)
 ## Flight Level Recommendation (route briefings only, if FL compare data provided)
@@ -498,7 +497,6 @@ Guidelines:
 - Use metric units (meters visibility, hPa pressure) plus feet for altitude/ceiling
 - Flag: icing risk, strong winds (>15kt) or gusts (>20kt), crosswind components, low visibility (<5km), thunderstorms, turbulence
 - Note runway suitability concerns if runway data is available
-- When airgram data is provided, summarize winds and temperatures at key altitude levels relevant to the flight
 - When FL compare data is provided, identify the optimal flight level for time/fuel and compare against the selected FL. Note headwind/tailwind differences. Recommend an FL if a significantly better option exists (>5 min or >2 gal savings)
 - Keep concise: 200-350 words
 - If insufficient data is provided, state what's missing and brief on what you can`;
@@ -525,10 +523,6 @@ NOTAMs: ${d.notams && d.notams.length > 0 ? d.notams.map(n => n.id + ': ' + n.te
             `(${s.lat.toFixed(1)},${s.lon.toFixed(1)}): wind ${s.windDir || '?'}°/${s.windSpd || '?'}kt, ${s.weather || '?'}, temp ${s.temp || '?'}°C, vis ${s.vis || '?'}m`
           ).join('\n');
 
-          const airgramStr = d.airgramSummary && d.airgramSummary.length > 0
-            ? d.airgramSummary.map(a => `${a.level}hPa (~FL${Math.round(a.altFt / 100)}): wind ${a.windDir}°/${a.windSpd}kt, temp ${a.temp}°C, cloud ${a.cloud}%`).join('\n')
-            : 'Not available';
-
           const flCompStr = d.flCompare && d.flCompare.length > 0
             ? d.flCompare.map(f => `FL${f.fl < 100 ? '0' : ''}${f.fl}: ${f.timeH}h, ${f.fuelGal}gal, avg HW ${f.hwKt > 0 ? '+' : ''}${f.hwKt}kt`).join('\n')
             : 'Not available';
@@ -548,9 +542,6 @@ NOTAMs: ${d.departure && d.departure.notams && d.departure.notams.length > 0 ? d
 
 En-Route Weather Samples (surface):
 ${enrouteWx || 'Not available'}
-
-Winds Aloft (route-average by pressure level):
-${airgramStr}
 
 FL Compare (time/fuel/headwind for FL10-FL200, selected FL${d.flightLevel || '?'}):
 ${flCompStr}
