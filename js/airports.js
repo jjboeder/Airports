@@ -1087,15 +1087,10 @@
 
   // --- METAR layer: updates airport marker icons with flight category ---
   function setupMetarLayer(map, layerControl, airportData, markersByIcao, typeLayers) {
-    var metarLayer = L.layerGroup(); // dummy layer for toggle control
-    var metarActive = false;
+    var metarActive = true;
     var fetchTimer = null;
     var refreshTimer = null;
     var updatedIcaos = []; // track which markers we've modified
-    var hiddenByWxFilter = []; // markers hidden by weather filter
-    var wxFilterActive = false;
-
-    var BAD_WX_CATS = { 'IFR': true, 'LIFR': true };
 
     // Collect airports that likely have METARs (large + medium with ICAO codes)
     var metarAirports = [];
@@ -1186,37 +1181,6 @@
       });
     }
 
-    function restoreWxFilter() {
-      for (var i = 0; i < hiddenByWxFilter.length; i++) {
-        var icao = hiddenByWxFilter[i];
-        var marker = markersByIcao[icao];
-        if (!marker) continue;
-        var layer = typeLayers[marker._airportType];
-        if (layer && !layer.hasLayer(marker)) {
-          layer.addLayer(marker);
-        }
-      }
-      hiddenByWxFilter = [];
-    }
-
-    function applyWxFilter() {
-      restoreWxFilter();
-      if (!wxFilterActive || !metarActive) return;
-      var icaos = Object.keys(metarCache);
-      for (var i = 0; i < icaos.length; i++) {
-        var icao = icaos[i];
-        var metar = metarCache[icao];
-        if (!metar || !BAD_WX_CATS[metar.fltCat]) continue;
-        var marker = markersByIcao[icao];
-        if (!marker) continue;
-        var layer = typeLayers[marker._airportType];
-        if (layer && layer.hasLayer(marker)) {
-          layer.removeLayer(marker);
-          hiddenByWxFilter.push(icao);
-        }
-      }
-    }
-
     function applyMetarToMarkers(results) {
       if (!metarActive) return;
       restoreOriginalIcons();
@@ -1241,7 +1205,6 @@
         marker.setTooltipContent(tip);
       }
       console.log('METAR: updated ' + results.length + ' airport markers');
-      applyWxFilter();
     }
 
     function debouncedFetch() {
@@ -1249,42 +1212,10 @@
       fetchTimer = setTimeout(fetchMetarsForMap, 500);
     }
 
-    map.on('overlayadd', function (e) {
-      if (e.layer === metarLayer) {
-        metarActive = true;
-        fetchMetarsForMap();
-        map.on('moveend', debouncedFetch);
-        refreshTimer = setInterval(fetchMetarsForMap, 5 * 60 * 1000);
-      }
-    });
-
-    map.on('overlayremove', function (e) {
-      if (e.layer === metarLayer) {
-        metarActive = false;
-        map.off('moveend', debouncedFetch);
-        clearTimeout(fetchTimer);
-        clearInterval(refreshTimer);
-        restoreWxFilter();
-        restoreOriginalIcons();
-      }
-    });
-
-    // Weather filter checkbox
-    var wxToggle = document.getElementById('wx-filter-toggle');
-    if (wxToggle) {
-      wxToggle.addEventListener('change', function () {
-        wxFilterActive = wxToggle.checked;
-        if (wxFilterActive) {
-          applyWxFilter();
-        } else {
-          restoreWxFilter();
-        }
-      });
-    }
-
-    layerControl.addOverlay(metarLayer, 'METAR weather');
-    // Enable METAR layer by default
-    map.addLayer(metarLayer);
+    // Start fetching METARs immediately and on map move
+    fetchMetarsForMap();
+    map.on('moveend', debouncedFetch);
+    refreshTimer = setInterval(fetchMetarsForMap, 5 * 60 * 1000);
   }
 
   // --- Main load ---
