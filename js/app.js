@@ -11,11 +11,29 @@
     maxZoom: 18
   });
 
-  // OpenStreetMap tile layer
-  const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    maxZoom: 19
-  }).addTo(map);
+  // Basemap tile layers
+  var osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+  var basemaps = {
+    'Light': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: osmAttr + ' &copy; <a href="https://carto.com/">CARTO</a>', maxZoom: 20, subdomains: 'abcd'
+    }),
+    'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: osmAttr + ' &copy; <a href="https://carto.com/">CARTO</a>', maxZoom: 20, subdomains: 'abcd'
+    }),
+    'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: osmAttr, maxZoom: 19
+    }),
+    'Topo': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      attribution: osmAttr + ' &copy; <a href="https://opentopomap.org">OpenTopoMap</a>', maxZoom: 17
+    }),
+    'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '&copy; Esri', maxZoom: 19
+    }),
+    'Stadia Smooth': L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png', {
+      attribution: osmAttr + ' &copy; <a href="https://stadiamaps.com/">Stadia</a>', maxZoom: 20
+    })
+  };
+  basemaps['Light'].addTo(map);
 
   // Generate a pastel color from a string (country ISO code)
   function countryColor(str) {
@@ -37,8 +55,8 @@
       || feature.properties.NAME
       || '';
     return {
-      fillColor: countryColor(iso),
-      fillOpacity: 0.25,
+      fillColor: 'transparent',
+      fillOpacity: 0,
       color: '#666',
       weight: 1.5,
       opacity: 0.7
@@ -49,7 +67,7 @@
     const layer = e.target;
     layer.setStyle({
       weight: 3,
-      fillOpacity: 0.4,
+      fillOpacity: 0,
       opacity: 1
     });
     layer.bringToFront();
@@ -62,10 +80,6 @@
   }
 
   function onEachCountry(feature, layer) {
-    layer.on({
-      mouseover: highlightCountry,
-      mouseout: resetCountryHighlight
-    });
   }
 
   // Load Europe GeoJSON
@@ -89,8 +103,9 @@
       setupLayerControl();
     });
 
-  // OpenWeatherMap weather tile layers
+  // OpenWeatherMap weather tile layers (all 2.0 API with time support)
   var OWM_PROXY = 'https://owm-proxy.jjboeder.workers.dev';
+  // OWM 1.0 layers (free tier)
   var OWM_LAYERS = [
     { id: 'wind_new', label: 'Wind' },
     { id: 'clouds_new', label: 'Clouds' },
@@ -99,15 +114,16 @@
     { id: 'temp_new', label: 'Temperature' }
   ];
 
+  var wxActiveLayerGroups = [];
+
   function createWeatherLayers() {
     var layers = {};
-    var tileUrl = OWM_PROXY + '/tile/{layer}/{z}/{x}/{y}.png';
     OWM_LAYERS.forEach(function (l) {
-      var url = tileUrl.replace('{layer}', l.id);
-      // Stack two copies: a dark backdrop + the weather tile on top for visibility
-      var backdrop = L.tileLayer(url, { opacity: 0.6, maxZoom: 18 });
-      var top = L.tileLayer(url, { opacity: 1, maxZoom: 18, attribution: '&copy; OpenWeatherMap' });
-      layers[l.label] = L.layerGroup([backdrop, top]);
+      var url = OWM_PROXY + '/tile/' + l.id + '/{z}/{x}/{y}.png';
+      var tileLayer = L.tileLayer(url, { opacity: 1.0, maxZoom: 18, attribution: '&copy; OpenWeatherMap' });
+      var group = L.layerGroup([tileLayer]);
+      layers[l.label] = group;
+      wxActiveLayerGroups.push(group);
     });
     return layers;
   }
@@ -271,14 +287,13 @@
   }
 
   function windGridStep(zoom) {
-    if (zoom <= 4) return 8;
-    if (zoom <= 5) return 5;
+    if (zoom <= 4) return 6;
+    if (zoom <= 5) return 4;
     if (zoom <= 6) return 3;
     if (zoom <= 7) return 2;
-    if (zoom <= 8) return 1;
-    if (zoom <= 9) return 0.5;
-    if (zoom <= 10) return 0.3;
-    return 0.15;
+    if (zoom <= 8) return 1.5;
+    if (zoom <= 9) return 1;
+    return 0.5;
   }
 
   function setupWindBarbLayer(map, overlays) {
@@ -297,7 +312,16 @@
     function fetchAndRenderBarbs() {
       if (!barbActive) return;
       var bounds = map.getBounds();
-      var step = windGridStep(map.getZoom());
+      var lonStep = windGridStep(map.getZoom());
+      var latStep = Math.round((lonStep / 3) * 100) / 100;
+      var latSpan = bounds.getNorth() - bounds.getSouth();
+      var lonSpan = bounds.getEast() - bounds.getWest();
+      // Ensure we don't exceed ~108 grid points
+      while ((Math.floor(latSpan / latStep) + 1) * (Math.floor(lonSpan / lonStep) + 1) > 108) {
+        lonStep *= 1.5;
+        latStep = Math.round((lonStep / 3) * 100) / 100;
+      }
+      lonStep = Math.round(lonStep * 100) / 100;
       var bbox = [
         bounds.getSouth().toFixed(2),
         bounds.getWest().toFixed(2),
@@ -305,7 +329,7 @@
         bounds.getEast().toFixed(2)
       ].join(',');
 
-      fetch(OWM_PROXY + '/wind-grid?bbox=' + bbox + '&step=' + step)
+      fetch(OWM_PROXY + '/wind-grid?bbox=' + bbox + '&step=' + lonStep + '&latStep=' + latStep)
         .then(function (res) { return res.json(); })
         .then(function (data) {
           if (!barbActive || !Array.isArray(data)) return;
@@ -367,13 +391,13 @@
       overlays['Country boundaries'] = countriesLayer;
     }
 
-    // Add weather overlays
+    // Weather layers as radio buttons (separate control)
     var weatherLayers = createWeatherLayers();
-    var weatherLayerSet = [];
+    var wxBasemaps = { 'No weather': L.layerGroup() };
     Object.keys(weatherLayers).forEach(function (name) {
-      overlays[name] = weatherLayers[name];
-      weatherLayerSet.push(weatherLayers[name]);
+      wxBasemaps[name] = weatherLayers[name];
     });
+    wxBasemaps['No weather'].addTo(map); // default selection
 
     // AMA grid overlay
     var amaLayer = L.layerGroup();
@@ -389,7 +413,13 @@
     window.AirportApp = window.AirportApp || {};
     window.AirportApp.map = map;
     window.AirportApp.overlays = overlays;
-    window.AirportApp.layerControl = L.control.layers(null, overlays, {
+    window.AirportApp.layerControl = L.control.layers(basemaps, overlays, {
+      collapsed: true,
+      position: 'topright'
+    }).addTo(map);
+
+    // Weather radio-button control (below main control)
+    L.control.layers(wxBasemaps, null, {
       collapsed: true,
       position: 'topright'
     }).addTo(map);
@@ -411,7 +441,7 @@
     new SwcControl().addTo(map);
 
     // Weather detail popup on map click when a weather layer is active
-    setupWeatherPopup(weatherLayerSet);
+    setupWeatherPopup();
 
     // Trigger airport loading
     if (typeof window.AirportApp.loadAirports === 'function') {
@@ -419,98 +449,997 @@
     }
   }
 
-  function setupWeatherPopup(weatherLayerSet) {
-    var weatherPopup = L.popup({ maxWidth: 300, className: 'weather-popup' });
+  // --- Shared weather helpers (One Call 3.0) ---
+  function degToDir(deg) {
+    var dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    return dirs[Math.round(deg / 22.5) % 16];
+  }
 
-    function isAnyWeatherActive() {
-      for (var i = 0; i < weatherLayerSet.length; i++) {
-        if (map.hasLayer(weatherLayerSet[i])) return true;
+  function msToKts(ms) {
+    return Math.round(ms * 1.944);
+  }
+
+  function owmIcon(code, size) {
+    return 'https://openweathermap.org/img/wn/' + code + (size === 2 ? '@2x' : '') + '.png';
+  }
+
+  function utcHH(epoch) {
+    var d = new Date(epoch * 1000);
+    var h = d.getUTCHours();
+    return (h < 10 ? '0' : '') + h;
+  }
+
+  function buildOneCallHtml(data, extraRows) {
+    var c = data.current;
+    var w = c.weather && c.weather[0];
+    var html = '<div class="wx-popup">';
+
+    // Header: icon + temp + description
+    html += '<div class="wx-header">';
+    if (w) html += '<img src="' + owmIcon(w.icon, 2) + '" class="wx-icon" title="' + w.description + '" alt="' + w.description + '">';
+    html += '<div>';
+    html += '<div class="wx-temp-big">' + Math.round(c.temp) + '\u00B0C</div>';
+    if (w) html += '<div class="wx-desc">' + w.description + '</div>';
+    html += '</div></div>';
+
+    // Current details as horizontal chips
+    html += '<div class="wx-chips">';
+    html += '<span class="wx-chip">Feels ' + Math.round(c.feels_like) + '\u00B0C</span>';
+    var windStr = msToKts(c.wind_speed) + 'kt';
+    if (c.wind_deg != null) windStr = degToDir(c.wind_deg) + ' ' + windStr;
+    if (c.wind_gust) windStr += ' G' + msToKts(c.wind_gust);
+    html += '<span class="wx-chip">' + windStr + '</span>';
+    if (c.visibility != null) {
+      var vis = c.visibility >= 10000 ? '10+km' : (c.visibility / 1000).toFixed(1) + 'km';
+      html += '<span class="wx-chip">Vis ' + vis + '</span>';
+    }
+    html += '<span class="wx-chip">QNH ' + c.pressure + '</span>';
+    if (extraRows) html += extraRows;
+    html += '</div>';
+
+    // 3-hourly horizontal timeline (every 3 hours)
+    var hourly = data.hourly;
+    if (hourly && hourly.length > 0) {
+      html += '<div class="wx-hourly">';
+      for (var i = 0; i < hourly.length && i < 18; i += 3) {
+        var h = hourly[i];
+        var hw = h.weather && h.weather[0];
+        var hWind = msToKts(h.wind_speed);
+        var hDir = h.wind_deg != null ? degToDir(h.wind_deg) : '';
+        var hGust = h.wind_gust ? msToKts(h.wind_gust) : 0;
+        var windLine = hDir + ' ' + hWind;
+        if (hGust > hWind) windLine += 'G' + hGust;
+        html += '<div class="wx-hour">';
+        html += '<div class="wx-hour-time">' + utcHH(h.dt) + 'Z</div>';
+        if (hw) html += '<img src="' + owmIcon(hw.icon, 2) + '" class="wx-hour-icon" title="' + hw.description + '" alt="' + hw.description + '">';
+        html += '<div class="wx-hour-temp">' + Math.round(h.temp) + '\u00B0</div>';
+        html += '<div class="wx-hour-wind">' + windLine + '</div>';
+        if (h.pop > 0.05) html += '<div class="wx-hour-pop">' + Math.round(h.pop * 100) + '%</div>';
+        html += '</div>';
       }
-      return false;
+      html += '</div>';
     }
 
-    function degToDir(deg) {
-      var dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-                  'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-      return dirs[Math.round(deg / 22.5) % 16];
-    }
+    html += '</div>';
+    return html;
+  }
 
-    function msToKts(ms) {
-      return Math.round(ms * 1.944);
-    }
+  function amaHtml(lat, lon) {
+    var idx = window._amaIndex;
+    if (!idx) return '';
+    var key = Math.floor(lat) + ',' + Math.floor(lon);
+    var val = idx[key];
+    if (val == null) return '';
+    return '<span class="wx-chip">AMA ' + val + ' ft</span>';
+  }
 
-    function buildWeatherHtml(d, extraRows) {
-      var w = d.weather && d.weather[0];
-      var icon = w ? 'https://openweathermap.org/img/wn/' + w.icon + '@2x.png' : '';
-      var html = '<div class="wx-popup">';
-      html += '<div class="wx-header">';
-      if (icon) html += '<img src="' + icon + '" class="wx-icon" alt="">';
-      html += '<div>';
-      html += '<div class="wx-location">' + (d.name || '') + (d.sys && d.sys.country ? ', ' + d.sys.country : '') + '</div>';
-      if (w) html += '<div class="wx-desc">' + w.description + '</div>';
-      html += '</div></div>';
-      html += '<div class="wx-details">';
-      if (d.main) {
-        html += '<div class="wx-row"><span class="wx-label">Temp</span><span>' + Math.round(d.main.temp) + ' °C (feels ' + Math.round(d.main.feels_like) + ' °C)</span></div>';
-        html += '<div class="wx-row"><span class="wx-label">Humidity</span><span>' + d.main.humidity + '%</span></div>';
-        html += '<div class="wx-row"><span class="wx-label">Pressure</span><span>' + d.main.pressure + ' hPa</span></div>';
-      }
-      if (d.wind) {
-        var windStr = msToKts(d.wind.speed) + ' kts';
-        if (d.wind.deg != null) windStr += ' from ' + degToDir(d.wind.deg) + ' (' + d.wind.deg + '°)';
-        if (d.wind.gust) windStr += ', gusts ' + msToKts(d.wind.gust) + ' kts';
-        html += '<div class="wx-row"><span class="wx-label">Wind</span><span>' + windStr + '</span></div>';
-      }
-      if (d.visibility != null) {
-        var vis = d.visibility >= 10000 ? '10+ km' : (d.visibility / 1000).toFixed(1) + ' km';
-        html += '<div class="wx-row"><span class="wx-label">Visibility</span><span>' + vis + '</span></div>';
-      }
-      if (d.clouds) {
-        html += '<div class="wx-row"><span class="wx-label">Clouds</span><span>' + d.clouds.all + '%</span></div>';
-      }
-      if (extraRows) html += extraRows;
-      html += '</div></div>';
-      return html;
-    }
+  // Fetch One Call 3.0 + overview, render into a target element
+  function fetchWeatherInto(el, lat, lon) {
+    var ama = amaHtml(lat, lon);
+    el.innerHTML = '<span class="metar-loading">Loading weather...</span>';
 
-    function amaHtml(lat, lon) {
-      var idx = window._amaIndex;
-      if (!idx) return '';
-      var key = Math.floor(lat) + ',' + Math.floor(lon);
-      var val = idx[key];
-      if (val == null) return '';
-      return '<div class="wx-row"><span class="wx-label">AMA</span><span style="font-style:italic;font-weight:600;">' + val + ' ft</span></div>';
-    }
-
-    map.on('click', function (e) {
-
-      var lat = e.latlng.lat.toFixed(4);
-      var lon = e.latlng.lng.toFixed(4);
-      var amaRow = amaHtml(e.latlng.lat, e.latlng.lng);
-
-      weatherPopup
-        .setLatLng(e.latlng)
-        .setContent('<div class="wx-popup"><span class="metar-loading">Loading weather...</span>' + amaRow + '</div>')
-        .openOn(map);
-
-      fetch(OWM_PROXY + '/weather?lat=' + lat + '&lon=' + lon)
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (data.cod !== 200) {
-            weatherPopup.setContent('<div class="wx-popup">Weather data unavailable' + amaRow + '</div>');
-            return;
-          }
-          weatherPopup.setContent(buildWeatherHtml(data, amaRow));
-        })
-        .catch(function () {
-          weatherPopup.setContent('<div class="wx-popup">Failed to load weather' + amaRow + '</div>');
+    Promise.all([
+      fetch(OWM_PROXY + '/onecall?lat=' + lat + '&lon=' + lon).then(function (r) { return r.json(); }),
+      fetch(OWM_PROXY + '/wx-overview?lat=' + lat + '&lon=' + lon).then(function (r) { return r.json(); })
+    ]).then(function (results) {
+      var oneCall = results[0];
+      var overview = results[1];
+      if (!oneCall.current) { el.innerHTML = '<span class="info-unknown">Weather unavailable</span>'; return; }
+      var html = buildOneCallHtml(oneCall, ama);
+      if (overview && overview.weather_overview) {
+        var text = overview.weather_overview.replace(/(\d+(?:\.\d+)?)\s*meter(?:s)?(?:\s*per\s*second|\/s(?:ec)?)/gi, function (m, v) {
+          return Math.round(parseFloat(v) * 1.944) + ' knots';
         });
+        html += '<div class="wx-overview">' + text + '</div>';
+      }
+      el.innerHTML = html;
+    }).catch(function () {
+      el.innerHTML = '<span class="info-unknown">Failed to load weather</span>';
     });
   }
 
-  // Expose map for other modules
+  function setupWeatherPopup() {
+    var weatherPopup = L.popup({ maxWidth: 400, minWidth: 340, className: 'weather-popup' });
+
+    map.on('click', function (e) {
+      // In route mode, add map click as a waypoint (but not if an airport marker was just clicked)
+      if (window.AirportApp && window.AirportApp.routeMode) {
+        if (window.AirportApp.addMapWaypoint && !window.AirportApp.justAddedAirport) {
+          window.AirportApp.addMapWaypoint(e.latlng);
+        }
+        return;
+      }
+      var lat = e.latlng.lat.toFixed(4);
+      var lon = e.latlng.lng.toFixed(4);
+
+      var container = document.createElement('div');
+      container.innerHTML = '<span class="metar-loading">Loading weather...</span>';
+      weatherPopup
+        .setLatLng(e.latlng)
+        .setContent(container)
+        .openOn(map);
+
+      fetchWeatherInto(container, lat, lon);
+    });
+  }
+
+  // --- Airgram: Vertical profile chart (clouds + wind at altitude) ---
+
+  var AIRGRAM_LEVELS = [1000, 925, 850, 775, 700, 600, 500, 450];
+  var AIRGRAM_VARS = ['temperature', 'wind_speed', 'wind_direction', 'cloud_cover', 'geopotential_height'];
+  // Fixed FL labels for Y-axis (ft values)
+  var AIRGRAM_FL_LABELS = [
+    { label: 'FL000', ft: 0 },
+    { label: 'FL025', ft: 2500 },
+    { label: 'FL050', ft: 5000 },
+    { label: 'FL075', ft: 7500 },
+    { label: 'FL100', ft: 10000 },
+    { label: 'FL125', ft: 12500 },
+    { label: 'FL150', ft: 15000 },
+    { label: 'FL175', ft: 17500 },
+    { label: 'FL200', ft: 20000 }
+  ];
+  var AIRGRAM_MIN_FT = 0;
+  var AIRGRAM_MAX_FT = 20000;
+  var AIRGRAM_MIN_M = 0;
+  var AIRGRAM_MAX_M = 6096; // 20000 ft in meters
+
+  function buildAirgramUrl(lat, lon) {
+    var params = [];
+    for (var v = 0; v < AIRGRAM_VARS.length; v++) {
+      for (var l = 0; l < AIRGRAM_LEVELS.length; l++) {
+        params.push(AIRGRAM_VARS[v] + '_' + AIRGRAM_LEVELS[l] + 'hPa');
+      }
+    }
+    return 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon
+      + '&hourly=' + params.join(',')
+      + '&wind_speed_unit=kn&forecast_hours=24&timezone=UTC';
+  }
+
+  function tempToColor(t) {
+    // Map temperature to RGB: -40C=deep blue, -10C=cyan, 5C=green, 20C=yellow, 35C+=red
+    var r, g, b;
+    if (t <= -40) { r = 30; g = 30; b = 180; }
+    else if (t <= -10) { var f = (t + 40) / 30; r = Math.round(30 + f * 0); g = Math.round(30 + f * 190); b = Math.round(180 + f * (220 - 180)); }
+    else if (t <= 5) { var f = (t + 10) / 15; r = Math.round(30 + f * (50 - 30)); g = Math.round(220 - f * 40); b = Math.round(220 - f * 140); }
+    else if (t <= 20) { var f = (t - 5) / 15; r = Math.round(50 + f * (230 - 50)); g = Math.round(180 + f * (220 - 180)); b = Math.round(80 - f * 40); }
+    else if (t <= 35) { var f = (t - 20) / 15; r = Math.round(230 + f * 25); g = Math.round(220 - f * 170); b = Math.round(40 - f * 10); }
+    else { r = 255; g = 50; b = 30; }
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  function drawMiniBarb(ctx, cx, cy, speedKt, dirDeg, size) {
+    if (speedKt < 3) {
+      // Calm: small circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, size * 0.15, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      return;
+    }
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate((dirDeg + 180) * Math.PI / 180);
+
+    var halfLen = size * 0.45;
+    var barbLen = size * 0.3;
+
+    // Staff
+    ctx.beginPath();
+    ctx.moveTo(0, -halfLen);
+    ctx.lineTo(0, halfLen);
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1.2;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Circle at bottom (wind end)
+    ctx.beginPath();
+    ctx.arc(0, halfLen, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fill();
+
+    var remaining = Math.round(speedKt / 5) * 5;
+    var y = -halfLen;
+    var step = size * 0.15;
+
+    // Pennants (50 kt)
+    while (remaining >= 50) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(barbLen, y + step * 0.4);
+      ctx.lineTo(0, y + step * 0.8);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fill();
+      y += step;
+      remaining -= 50;
+    }
+    // Full barbs (10 kt)
+    while (remaining >= 10) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(barbLen, y - step * 0.5);
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      y += step * 0.7;
+      remaining -= 10;
+    }
+    // Half barb (5 kt)
+    if (remaining >= 5) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(barbLen * 0.5, y - step * 0.35);
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function renderAirgram(el, data) {
+    var hourly = data.hourly;
+    if (!hourly || !hourly.time) {
+      el.innerHTML = '<span class="info-unknown">No airgram data</span>';
+      return;
+    }
+
+    var nHours = Math.min(hourly.time.length, 24);
+    var nLevels = AIRGRAM_LEVELS.length;
+
+    // Parse into grid[levelIdx][hourIdx]
+    var grid = [];
+    for (var li = 0; li < nLevels; li++) {
+      grid[li] = [];
+      var lev = AIRGRAM_LEVELS[li];
+      var tempKey = 'temperature_' + lev + 'hPa';
+      var wsKey = 'wind_speed_' + lev + 'hPa';
+      var wdKey = 'wind_direction_' + lev + 'hPa';
+      var ccKey = 'cloud_cover_' + lev + 'hPa';
+      var ghKey = 'geopotential_height_' + lev + 'hPa';
+      for (var hi = 0; hi < nHours; hi++) {
+        grid[li][hi] = {
+          temp: hourly[tempKey] ? hourly[tempKey][hi] : null,
+          windSpd: hourly[wsKey] ? hourly[wsKey][hi] : null,
+          windDir: hourly[wdKey] ? hourly[wdKey][hi] : null,
+          cloud: hourly[ccKey] ? hourly[ccKey][hi] : null,
+          geoHt: hourly[ghKey] ? hourly[ghKey][hi] : null
+        };
+      }
+    }
+
+    // Canvas sizing
+    var containerWidth = el.clientWidth || 360;
+    var dpr = window.devicePixelRatio || 1;
+    var leftMargin = 48;
+    var rightMargin = 8;
+    var topMargin = 16;
+    var bottomMargin = 22;
+    var chartW = containerWidth - leftMargin - rightMargin;
+    var chartH = 240;
+    var canvasW = containerWidth;
+    var canvasH = chartH + topMargin + bottomMargin;
+
+    var canvas = document.createElement('canvas');
+    canvas.width = canvasW * dpr;
+    canvas.height = canvasH * dpr;
+    canvas.style.width = canvasW + 'px';
+    canvas.style.height = canvasH + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    // Y positions for each level (0=top=300hPa, 7=bottom=1000hPa)
+    // Use geopotential height to space levels proportionally
+    var geoHts = [];
+    for (var li = 0; li < nLevels; li++) {
+      var avg = 0;
+      var cnt = 0;
+      for (var hi = 0; hi < nHours; hi++) {
+        if (grid[li][hi].geoHt != null) { avg += grid[li][hi].geoHt; cnt++; }
+      }
+      geoHts[li] = cnt > 0 ? avg / cnt : null;
+    }
+
+    // Fallback: standard atmosphere heights (meters) for [1000,925,850,775,700,600,500,450] hPa
+    var stdHts = [111, 762, 1457, 2164, 3012, 4206, 5574, 6344];
+    for (var li = 0; li < nLevels; li++) {
+      if (geoHts[li] == null) geoHts[li] = stdHts[li];
+    }
+
+    // Fixed Y range: 0 to FL200 (0 to 6096 m)
+    var minHt = AIRGRAM_MIN_M;
+    var maxHt = AIRGRAM_MAX_M;
+    function htToY(ht) {
+      var frac = (ht - minHt) / (maxHt - minHt);
+      return topMargin + chartH * (1 - frac);
+    }
+
+    var levelY = [];
+    for (var li = 0; li < nLevels; li++) {
+      levelY[li] = htToY(geoHts[li]);
+    }
+
+    // X position for each hour
+    var cellW = chartW / nHours;
+    function hourX(hi) { return leftMargin + hi * cellW; }
+
+    // Helper: interpolate value between adjacent levels at a fractional level position
+    function interpLevel(hi, valKey, targetHt) {
+      for (var li = 0; li < nLevels - 1; li++) {
+        var h0 = geoHts[li], h1 = geoHts[li + 1];
+        if (targetHt >= h0 && targetHt <= h1) {
+          var frac = (targetHt - h0) / (h1 - h0);
+          var v0 = grid[li][hi][valKey];
+          var v1 = grid[li + 1][hi][valKey];
+          if (v0 != null && v1 != null) return v0 + frac * (v1 - v0);
+        }
+      }
+      return null;
+    }
+
+    // 1. Draw temperature background (smooth gradient)
+    var tempRows = 60;
+    for (var r = 0; r < tempRows; r++) {
+      var frac = r / tempRows;
+      var ht = maxHt - frac * (maxHt - minHt);
+      var y = topMargin + frac * chartH;
+      var rowH = chartH / tempRows + 1;
+      for (var hi = 0; hi < nHours; hi++) {
+        var t = interpLevel(hi, 'temp', ht);
+        if (t == null) continue;
+        ctx.fillStyle = tempToColor(t);
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(hourX(hi), y, cellW + 0.5, rowH);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // 2. Overlay cloud cover as semi-transparent grey
+    for (var li = 0; li < nLevels; li++) {
+      for (var hi = 0; hi < nHours; hi++) {
+        var cc = grid[li][hi].cloud;
+        if (cc == null || cc < 5) continue;
+        // Determine cell height: span between midpoints to adjacent levels
+        var yTop, yBot;
+        if (li === nLevels - 1) {
+          yTop = (li > 0) ? (levelY[li] + levelY[li - 1]) / 2 : topMargin;
+          yBot = levelY[li] + (levelY[li] - yTop);
+        } else if (li === 0) {
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+          yTop = levelY[li] - (yBot - levelY[li]);
+        } else {
+          yTop = (levelY[li] + levelY[li - 1]) / 2;
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+        }
+        // Clamp to chart area
+        yTop = Math.max(yTop, topMargin);
+        yBot = Math.min(yBot, topMargin + chartH);
+
+        var alpha = (cc / 100) * 0.75;
+        ctx.fillStyle = 'rgba(170,170,170,' + alpha.toFixed(2) + ')';
+        ctx.fillRect(hourX(hi), yTop, cellW + 0.5, yBot - yTop);
+      }
+    }
+
+    // 3. Draw freezing level line (0C isotherm)
+    ctx.beginPath();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 1.5;
+    var started = false;
+    for (var hi = 0; hi < nHours; hi++) {
+      // Find height where temp crosses 0C
+      var fzHt = null;
+      for (var li = 0; li < nLevels - 1; li++) {
+        var t0 = grid[li][hi].temp;
+        var t1 = grid[li + 1][hi].temp;
+        if (t0 == null || t1 == null) continue;
+        if ((t0 >= 0 && t1 <= 0) || (t0 <= 0 && t1 >= 0)) {
+          var frac = Math.abs(t0) / (Math.abs(t0) + Math.abs(t1));
+          fzHt = geoHts[li] + frac * (geoHts[li + 1] - geoHts[li]);
+          break;
+        }
+      }
+      if (fzHt != null) {
+        var x = hourX(hi) + cellW / 2;
+        var y = htToY(fzHt);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 4. Draw grid lines at FL label positions
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 0.5;
+    for (var fi = 0; fi < AIRGRAM_FL_LABELS.length; fi++) {
+      var gy = htToY(AIRGRAM_FL_LABELS[fi].ft * 0.3048);
+      ctx.beginPath();
+      ctx.moveTo(leftMargin, gy);
+      ctx.lineTo(leftMargin + chartW, gy);
+      ctx.stroke();
+    }
+    // Vertical (every 3 hours)
+    for (var hi = 0; hi < nHours; hi++) {
+      if (hi % 3 === 0) {
+        ctx.beginPath();
+        ctx.moveTo(hourX(hi), topMargin);
+        ctx.lineTo(hourX(hi), topMargin + chartH);
+        ctx.stroke();
+      }
+    }
+
+    // 5. Draw mini wind barbs
+    for (var li = 0; li < nLevels; li++) {
+      for (var hi = 0; hi < nHours; hi++) {
+        // Draw barb every 2 hours to avoid clutter
+        if (hi % 2 !== 0) continue;
+        var cell = grid[li][hi];
+        if (cell.windSpd == null || cell.windDir == null) continue;
+        var x = hourX(hi) + cellW / 2;
+        var y = levelY[li];
+        drawMiniBarb(ctx, x, y, cell.windSpd, cell.windDir, 20);
+      }
+    }
+
+    // 6. Axis labels
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textBaseline = 'middle';
+
+    // Left: fixed FL labels
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#444';
+    for (var fi = 0; fi < AIRGRAM_FL_LABELS.length; fi++) {
+      var flY = htToY(AIRGRAM_FL_LABELS[fi].ft * 0.3048);
+      ctx.fillText(AIRGRAM_FL_LABELS[fi].label, leftMargin - 4, flY);
+    }
+
+    // Bottom: UTC hours
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#555';
+    ctx.textBaseline = 'top';
+    for (var hi = 0; hi < nHours; hi++) {
+      if (hi % 3 === 0) {
+        var dt = new Date(hourly.time[hi]);
+        var hh = dt.getUTCHours();
+        var label = (hh < 10 ? '0' : '') + hh + 'Z';
+        ctx.fillText(label, hourX(hi) + cellW / 2, topMargin + chartH + 4);
+      }
+    }
+
+    // Chart border
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(leftMargin, topMargin, chartW, chartH);
+
+    // Build container
+    var container = document.createElement('div');
+    container.className = 'airgram-container';
+    container.appendChild(canvas);
+
+    // Tooltip
+    var tip = document.createElement('div');
+    tip.className = 'airgram-tip';
+    tip.style.display = 'none';
+    container.appendChild(tip);
+
+    canvas.addEventListener('mousemove', function (e) {
+      var rect = canvas.getBoundingClientRect();
+      var scaleX = canvasW / rect.width;
+      var scaleY = canvasH / rect.height;
+      var mx = (e.clientX - rect.left) * scaleX;
+      var my = (e.clientY - rect.top) * scaleY;
+      var hi = Math.floor((mx - leftMargin) / cellW);
+      if (hi < 0 || hi >= nHours || mx < leftMargin || mx > leftMargin + chartW || my < topMargin || my > topMargin + chartH) {
+        tip.style.display = 'none'; return;
+      }
+      var bestLi = 0, bestDist = Infinity;
+      for (var li = 0; li < nLevels; li++) {
+        var d = Math.abs(my - levelY[li]);
+        if (d < bestDist) { bestDist = d; bestLi = li; }
+      }
+      var cell = grid[bestLi][hi];
+      var parts = [];
+      var curFt = (minHt + (maxHt - minHt) * (1 - (my - topMargin) / chartH)) * 3.28084;
+      var bandLo = AIRGRAM_FL_LABELS[0].ft, bandHi = AIRGRAM_FL_LABELS[AIRGRAM_FL_LABELS.length - 1].ft;
+      for (var fi = 0; fi < AIRGRAM_FL_LABELS.length - 1; fi++) {
+        if (curFt >= AIRGRAM_FL_LABELS[fi].ft && curFt < AIRGRAM_FL_LABELS[fi + 1].ft) {
+          bandLo = AIRGRAM_FL_LABELS[fi].ft; bandHi = AIRGRAM_FL_LABELS[fi + 1].ft; break;
+        }
+      }
+      function fmtFL(ft) { var v = Math.round(ft / 100); return 'FL' + (v < 100 ? (v < 10 ? '00' : '0') : '') + v; }
+      parts.push(fmtFL(bandLo) + '\u2013' + fmtFL(bandHi));
+      if (cell.windSpd != null && cell.windDir != null) {
+        parts.push(Math.round(cell.windDir) + '\u00B0 / ' + Math.round(cell.windSpd) + ' kt');
+      }
+      if (cell.temp != null) parts.push(Math.round(cell.temp) + '\u00B0C');
+      if (cell.cloud != null) parts.push(Math.round(cell.cloud) + '% cloud');
+      tip.textContent = parts.join('  ');
+      tip.style.display = 'block';
+      var cssMx = e.clientX - rect.left;
+      var cssMy = e.clientY - rect.top;
+      var tx = cssMx + 12, ty = cssMy - 20;
+      if (tx + tip.offsetWidth > container.offsetWidth) tx = cssMx - tip.offsetWidth - 8;
+      tip.style.left = tx + 'px';
+      tip.style.top = ty + 'px';
+    });
+    canvas.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
+
+    // Legend
+    var legend = document.createElement('div');
+    legend.className = 'airgram-legend';
+    legend.innerHTML = '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:rgba(170,170,170,0.75);"></div>Cloud</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:#00e5ff;border-style:dashed;"></div>0\u00B0C</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(-20) + ';opacity:0.5;"></div>-20\u00B0C</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(0) + ';opacity:0.5;"></div>0\u00B0C</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(20) + ';opacity:0.5;"></div>20\u00B0C</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(35) + ';opacity:0.5;"></div>35\u00B0C</div>';
+    container.appendChild(legend);
+
+    el.innerHTML = '';
+    el.appendChild(container);
+  }
+
+  function fetchAirgramInto(el, lat, lon) {
+    if (el._airgramLoaded) return;
+    el._airgramLoaded = true;
+    el.innerHTML = '<span class="metar-loading">Loading Airgram...</span>';
+
+    var url = buildAirgramUrl(lat, lon);
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        renderAirgram(el, data);
+      })
+      .catch(function (err) {
+        el.innerHTML = '<span class="info-unknown">Airgram unavailable</span>';
+        console.error('Airgram fetch error:', err);
+      });
+  }
+
+  // --- Route Airgram: cross-section along route ---
+  // samples: [{lat, lon, dist, timeH, etaEpoch, label}]
+
+  function buildRouteAirgramUrl(samples) {
+    var lats = [], lons = [];
+    for (var i = 0; i < samples.length; i++) {
+      lats.push(samples[i].lat);
+      lons.push(samples[i].lon);
+    }
+    var params = [];
+    for (var v = 0; v < AIRGRAM_VARS.length; v++) {
+      for (var l = 0; l < AIRGRAM_LEVELS.length; l++) {
+        params.push(AIRGRAM_VARS[v] + '_' + AIRGRAM_LEVELS[l] + 'hPa');
+      }
+    }
+    return 'https://api.open-meteo.com/v1/forecast?latitude=' + lats.join(',')
+      + '&longitude=' + lons.join(',')
+      + '&hourly=' + params.join(',')
+      + '&wind_speed_unit=kn&forecast_hours=24&timezone=UTC';
+  }
+
+  function renderRouteAirgram(el, responses, samples) {
+    var nPoints = samples.length;
+    var nLevels = AIRGRAM_LEVELS.length;
+
+    // For each sample point, pick the hour closest to etaEpoch
+    var grid = []; // grid[levelIdx][pointIdx]
+    for (var li = 0; li < nLevels; li++) {
+      grid[li] = [];
+      var lev = AIRGRAM_LEVELS[li];
+      var tempKey = 'temperature_' + lev + 'hPa';
+      var wsKey = 'wind_speed_' + lev + 'hPa';
+      var wdKey = 'wind_direction_' + lev + 'hPa';
+      var ccKey = 'cloud_cover_' + lev + 'hPa';
+      var ghKey = 'geopotential_height_' + lev + 'hPa';
+
+      for (var pi = 0; pi < nPoints; pi++) {
+        var resp = responses[pi];
+        var hourly = resp && resp.hourly;
+        if (!hourly || !hourly.time) {
+          grid[li][pi] = { temp: null, windSpd: null, windDir: null, cloud: null, geoHt: null };
+          continue;
+        }
+
+        // Find closest hour to eta
+        var hi = 0;
+        if (samples[pi].etaEpoch) {
+          var etaMs = samples[pi].etaEpoch * 1000;
+          var bestDiff = Infinity;
+          for (var h = 0; h < hourly.time.length; h++) {
+            var tMs = new Date(hourly.time[h]).getTime();
+            var diff = Math.abs(tMs - etaMs);
+            if (diff < bestDiff) { bestDiff = diff; hi = h; }
+          }
+        }
+
+        grid[li][pi] = {
+          temp: hourly[tempKey] ? hourly[tempKey][hi] : null,
+          windSpd: hourly[wsKey] ? hourly[wsKey][hi] : null,
+          windDir: hourly[wdKey] ? hourly[wdKey][hi] : null,
+          cloud: hourly[ccKey] ? hourly[ccKey][hi] : null,
+          geoHt: hourly[ghKey] ? hourly[ghKey][hi] : null
+        };
+      }
+    }
+
+    // Canvas sizing
+    var containerWidth = el.clientWidth || 500;
+    var dpr = window.devicePixelRatio || 1;
+    var leftMargin = 48;
+    var rightMargin = 8;
+    var topMargin = 16;
+    var bottomMargin = 36;
+    var chartW = containerWidth - leftMargin - rightMargin;
+    var chartH = 260;
+    var canvasW = containerWidth;
+    var canvasH = chartH + topMargin + bottomMargin;
+
+    var canvas = document.createElement('canvas');
+    canvas.width = canvasW * dpr;
+    canvas.height = canvasH * dpr;
+    canvas.style.width = canvasW + 'px';
+    canvas.style.height = canvasH + 'px';
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    // Y positions from geopotential height
+    var geoHts = [];
+    for (var li = 0; li < nLevels; li++) {
+      var avg = 0, cnt = 0;
+      for (var pi = 0; pi < nPoints; pi++) {
+        if (grid[li][pi].geoHt != null) { avg += grid[li][pi].geoHt; cnt++; }
+      }
+      geoHts[li] = cnt > 0 ? avg / cnt : null;
+    }
+    // Fallback: standard atmosphere heights (meters) for [1000,925,850,775,700,600,500,450] hPa
+    var stdHts = [111, 762, 1457, 2164, 3012, 4206, 5574, 6344];
+    for (var li = 0; li < nLevels; li++) {
+      if (geoHts[li] == null) geoHts[li] = stdHts[li];
+    }
+    // Fixed Y range: 0 to FL200 (0 to 6096 m)
+    var minHt = AIRGRAM_MIN_M, maxHt = AIRGRAM_MAX_M;
+    function htToY(ht) {
+      var frac = (ht - minHt) / (maxHt - minHt);
+      return topMargin + chartH * (1 - frac);
+    }
+    var levelY = [];
+    for (var li = 0; li < nLevels; li++) { levelY[li] = htToY(geoHts[li]); }
+
+    // X position for each sample point
+    var totalDist = samples[nPoints - 1].dist || 1;
+    var cellW = chartW / nPoints;
+    function ptX(pi) { return leftMargin + pi * cellW; }
+
+    // Helper: interpolate between levels
+    function interpLevel(pi, valKey, targetHt) {
+      for (var li = 0; li < nLevels - 1; li++) {
+        var h0 = geoHts[li], h1 = geoHts[li + 1];
+        if (targetHt >= h0 && targetHt <= h1) {
+          var frac = (targetHt - h0) / (h1 - h0);
+          var v0 = grid[li][pi][valKey];
+          var v1 = grid[li + 1][pi][valKey];
+          if (v0 != null && v1 != null) return v0 + frac * (v1 - v0);
+        }
+      }
+      return null;
+    }
+
+    // 1. Temperature background
+    var tempRows = 60;
+    for (var r = 0; r < tempRows; r++) {
+      var frac = r / tempRows;
+      var ht = maxHt - frac * (maxHt - minHt);
+      var y = topMargin + frac * chartH;
+      var rowH = chartH / tempRows + 1;
+      for (var pi = 0; pi < nPoints; pi++) {
+        var t = interpLevel(pi, 'temp', ht);
+        if (t == null) continue;
+        ctx.fillStyle = tempToColor(t);
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(ptX(pi), y, cellW + 0.5, rowH);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // 2. Cloud cover overlay
+    for (var li = 0; li < nLevels; li++) {
+      for (var pi = 0; pi < nPoints; pi++) {
+        var cc = grid[li][pi].cloud;
+        if (cc == null || cc < 5) continue;
+        var yTop, yBot;
+        if (li === nLevels - 1) {
+          yTop = (li > 0) ? (levelY[li] + levelY[li - 1]) / 2 : topMargin;
+          yBot = levelY[li] + (levelY[li] - yTop);
+        } else if (li === 0) {
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+          yTop = levelY[li] - (yBot - levelY[li]);
+        } else {
+          yTop = (levelY[li] + levelY[li - 1]) / 2;
+          yBot = (levelY[li] + levelY[li + 1]) / 2;
+        }
+        yTop = Math.max(yTop, topMargin);
+        yBot = Math.min(yBot, topMargin + chartH);
+        var alpha = (cc / 100) * 0.75;
+        ctx.fillStyle = 'rgba(170,170,170,' + alpha.toFixed(2) + ')';
+        ctx.fillRect(ptX(pi), yTop, cellW + 0.5, yBot - yTop);
+      }
+    }
+
+    // 3. Freezing level line
+    ctx.beginPath();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 1.5;
+    var started = false;
+    for (var pi = 0; pi < nPoints; pi++) {
+      var fzHt = null;
+      for (var li = 0; li < nLevels - 1; li++) {
+        var t0 = grid[li][pi].temp;
+        var t1 = grid[li + 1][pi].temp;
+        if (t0 == null || t1 == null) continue;
+        if ((t0 >= 0 && t1 <= 0) || (t0 <= 0 && t1 >= 0)) {
+          var fr = Math.abs(t0) / (Math.abs(t0) + Math.abs(t1));
+          fzHt = geoHts[li] + fr * (geoHts[li + 1] - geoHts[li]);
+          break;
+        }
+      }
+      if (fzHt != null) {
+        var x = ptX(pi) + cellW / 2;
+        var y = htToY(fzHt);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 4. Grid lines at FL label positions
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 0.5;
+    for (var fi = 0; fi < AIRGRAM_FL_LABELS.length; fi++) {
+      var gy = htToY(AIRGRAM_FL_LABELS[fi].ft * 0.3048);
+      ctx.beginPath();
+      ctx.moveTo(leftMargin, gy);
+      ctx.lineTo(leftMargin + chartW, gy);
+      ctx.stroke();
+    }
+    // Vertical lines at waypoints
+    for (var pi = 0; pi < nPoints; pi++) {
+      if (samples[pi].label) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(ptX(pi) + cellW / 2, topMargin);
+        ctx.lineTo(ptX(pi) + cellW / 2, topMargin + chartH);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+        ctx.lineWidth = 0.5;
+      }
+    }
+
+    // 5. Wind barbs (every other column)
+    for (var li = 0; li < nLevels; li++) {
+      for (var pi = 0; pi < nPoints; pi++) {
+        if (pi % 2 !== 0 && !samples[pi].label) continue;
+        var cell = grid[li][pi];
+        if (cell.windSpd == null || cell.windDir == null) continue;
+        var x = ptX(pi) + cellW / 2;
+        var y = levelY[li];
+        drawMiniBarb(ctx, x, y, cell.windSpd, cell.windDir, 20);
+      }
+    }
+
+    // 6. Axis labels
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textBaseline = 'middle';
+
+    // Left: fixed FL labels
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#444';
+    for (var fi = 0; fi < AIRGRAM_FL_LABELS.length; fi++) {
+      var flY = htToY(AIRGRAM_FL_LABELS[fi].ft * 0.3048);
+      ctx.fillText(AIRGRAM_FL_LABELS[fi].label, leftMargin - 4, flY);
+    }
+
+    // Bottom: waypoint labels and ETA
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#555';
+    ctx.textBaseline = 'top';
+    for (var pi = 0; pi < nPoints; pi++) {
+      if (samples[pi].label) {
+        ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillStyle = '#2980b9';
+        ctx.fillText(samples[pi].label, ptX(pi) + cellW / 2, topMargin + chartH + 4);
+        // ETA below
+        if (samples[pi].etaEpoch) {
+          var d = new Date(samples[pi].etaEpoch * 1000);
+          var hh = d.getUTCHours();
+          var mm = d.getUTCMinutes();
+          var eta = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + 'Z';
+          ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.fillStyle = '#888';
+          ctx.fillText(eta, ptX(pi) + cellW / 2, topMargin + chartH + 16);
+        }
+      } else {
+        // Show distance marker every ~3 columns
+        if (pi > 0 && pi < nPoints - 1 && pi % 3 === 0) {
+          ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.fillStyle = '#aaa';
+          ctx.fillText(Math.round(samples[pi].dist) + 'nm', ptX(pi) + cellW / 2, topMargin + chartH + 4);
+        }
+      }
+    }
+
+    // Chart border
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(leftMargin, topMargin, chartW, chartH);
+
+    // Build container
+    var container = document.createElement('div');
+    container.className = 'airgram-container';
+    container.appendChild(canvas);
+
+    // Tooltip
+    var tip = document.createElement('div');
+    tip.className = 'airgram-tip';
+    tip.style.display = 'none';
+    container.appendChild(tip);
+
+    canvas.addEventListener('mousemove', function (e) {
+      var rect = canvas.getBoundingClientRect();
+      var scaleX = canvasW / rect.width;
+      var scaleY = canvasH / rect.height;
+      var mx = (e.clientX - rect.left) * scaleX;
+      var my = (e.clientY - rect.top) * scaleY;
+      var pi = Math.floor((mx - leftMargin) / cellW);
+      if (pi < 0 || pi >= nPoints || mx < leftMargin || mx > leftMargin + chartW || my < topMargin || my > topMargin + chartH) {
+        tip.style.display = 'none'; return;
+      }
+      var bestLi = 0, bestDist = Infinity;
+      for (var li = 0; li < nLevels; li++) {
+        var d = Math.abs(my - levelY[li]);
+        if (d < bestDist) { bestDist = d; bestLi = li; }
+      }
+      var cell = grid[bestLi][pi];
+      var parts = [];
+      var curFt = (minHt + (maxHt - minHt) * (1 - (my - topMargin) / chartH)) * 3.28084;
+      var bandLo = AIRGRAM_FL_LABELS[0].ft, bandHi = AIRGRAM_FL_LABELS[AIRGRAM_FL_LABELS.length - 1].ft;
+      for (var fi = 0; fi < AIRGRAM_FL_LABELS.length - 1; fi++) {
+        if (curFt >= AIRGRAM_FL_LABELS[fi].ft && curFt < AIRGRAM_FL_LABELS[fi + 1].ft) {
+          bandLo = AIRGRAM_FL_LABELS[fi].ft; bandHi = AIRGRAM_FL_LABELS[fi + 1].ft; break;
+        }
+      }
+      function fmtFL(ft) { var v = Math.round(ft / 100); return 'FL' + (v < 100 ? (v < 10 ? '00' : '0') : '') + v; }
+      parts.push(fmtFL(bandLo) + '\u2013' + fmtFL(bandHi));
+      if (cell.windSpd != null && cell.windDir != null) {
+        parts.push(Math.round(cell.windDir) + '\u00B0 / ' + Math.round(cell.windSpd) + ' kt');
+      }
+      if (cell.temp != null) parts.push(Math.round(cell.temp) + '\u00B0C');
+      if (cell.cloud != null) parts.push(Math.round(cell.cloud) + '% cloud');
+      tip.textContent = parts.join('  ');
+      tip.style.display = 'block';
+      var cssMx = e.clientX - rect.left;
+      var cssMy = e.clientY - rect.top;
+      var tx = cssMx + 12, ty = cssMy - 20;
+      if (tx + tip.offsetWidth > container.offsetWidth) tx = cssMx - tip.offsetWidth - 8;
+      tip.style.left = tx + 'px';
+      tip.style.top = ty + 'px';
+    });
+    canvas.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
+
+    // Legend
+    var legend = document.createElement('div');
+    legend.className = 'airgram-legend';
+    legend.innerHTML = '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:rgba(170,170,170,0.75);"></div>Cloud</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:#00e5ff;border-style:dashed;"></div>0\u00B0C</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(-20) + ';opacity:0.5;"></div>Cold</div>'
+      + '<div class="airgram-legend-item"><div class="airgram-legend-swatch" style="background:' + tempToColor(20) + ';opacity:0.5;"></div>Warm</div>';
+    container.appendChild(legend);
+
+    el.innerHTML = '';
+    el.appendChild(container);
+  }
+
+  // Cache for route airgram data (shared between airgram chart and FL compare)
+  var routeAirgramCache = { samples: null, responses: null, timestamp: 0 };
+
+  function samplesCacheKey(samples) {
+    return samples.map(function (s) { return s.lat + ',' + s.lon; }).join('|');
+  }
+
+  function fetchRouteAirgramInto(el, samples) {
+    if (!samples || samples.length < 2) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = '<span class="metar-loading">Loading route profile...</span>';
+
+    var url = buildRouteAirgramUrl(samples);
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        // Open-Meteo returns array for multi-location, single object for one location
+        var responses = Array.isArray(data) ? data : [data];
+        // Cache for reuse by FL Compare
+        routeAirgramCache.samples = samplesCacheKey(samples);
+        routeAirgramCache.responses = responses;
+        routeAirgramCache.timestamp = Date.now();
+        renderRouteAirgram(el, responses, samples);
+      })
+      .catch(function (err) {
+        el.innerHTML = '<span class="info-unknown">Route profile unavailable</span>';
+        console.error('Route airgram error:', err);
+      });
+  }
+
+  function fetchRouteAirgramData(samples, callback) {
+    if (!samples || samples.length < 2) { callback(null); return; }
+    var key = samplesCacheKey(samples);
+    // Use cache if same samples and less than 10 minutes old
+    if (routeAirgramCache.responses && routeAirgramCache.samples === key
+        && (Date.now() - routeAirgramCache.timestamp) < 600000) {
+      callback(routeAirgramCache.responses);
+      return;
+    }
+    var url = buildRouteAirgramUrl(samples);
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var responses = Array.isArray(data) ? data : [data];
+        routeAirgramCache.samples = key;
+        routeAirgramCache.responses = responses;
+        routeAirgramCache.timestamp = Date.now();
+        callback(responses);
+      })
+      .catch(function (err) {
+        console.error('Route airgram data error:', err);
+        callback(null);
+      });
+  }
+
+  // Expose map and helpers for other modules
   window.AirportApp = window.AirportApp || {};
   window.AirportApp.map = map;
+  window.AirportApp.fetchWeatherInto = fetchWeatherInto;
+  window.AirportApp.fetchAirgramInto = fetchAirgramInto;
+  window.AirportApp.fetchRouteAirgramInto = fetchRouteAirgramInto;
+  window.AirportApp.fetchRouteAirgramData = fetchRouteAirgramData;
+  window.AirportApp.AIRGRAM_LEVELS = AIRGRAM_LEVELS;
 
   // --- Settings persistence (localStorage) ---
   var STORAGE_KEY = 'airports-panel-settings';
@@ -829,5 +1758,26 @@
         if (panel) panel.style.display = 'none';
       });
     }
+
+    // Panel minimize/restore
+    document.querySelectorAll('.panel-minimize').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var panel = document.getElementById(btn.getAttribute('data-target'));
+        var mini = document.getElementById(btn.getAttribute('data-mini'));
+        if (panel) panel.classList.add('minimized');
+        if (mini) mini.classList.add('visible');
+      });
+    });
+    document.querySelectorAll('.panel-mini').forEach(function (mini) {
+      mini.addEventListener('click', function () {
+        var panels = document.querySelectorAll('.panel.minimized');
+        panels.forEach(function (p) {
+          if (p.id && document.querySelector('[data-target="' + p.id + '"][data-mini="' + mini.id + '"]')) {
+            p.classList.remove('minimized');
+          }
+        });
+        mini.classList.remove('visible');
+      });
+    });
   });
 })();

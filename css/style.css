@@ -30,6 +30,45 @@ html, body {
   font-size: 13px;
 }
 
+.panel.minimized { display: none; }
+
+/* Minimized panel icon */
+.panel-mini {
+  display: none;
+  position: absolute;
+  z-index: 1000;
+  width: 34px;
+  height: 34px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 34px;
+  text-align: center;
+  color: #555;
+  user-select: none;
+}
+.panel-mini:hover { background: #e8e8e8; }
+.panel-mini.visible { display: block; }
+.panel-mini-left { bottom: 30px; left: 10px; }
+.panel-mini-right { bottom: 30px; right: 10px; }
+
+/* Minimize button inside legend */
+#legend .panel-minimize {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: #aaa;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+#legend .panel-minimize:hover { color: #555; }
+
 /* Airport search box */
 #airport-search {
   top: 12px;
@@ -113,6 +152,7 @@ html, body {
 }
 
 #legend {
+  position: absolute;
   bottom: 30px;
   left: 10px;
 }
@@ -247,6 +287,45 @@ html, body {
   font-size: 12px;
 }
 
+/* Extra tabs row (TAF / Weather / NOTAMs / Charts) */
+.popup-extra-tabs {
+  display: flex;
+  gap: 0;
+  margin: 6px 0 0 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.popup-extra-tab {
+  flex: 1;
+  padding: 5px 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #888;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  text-align: center;
+}
+.popup-extra-tab:hover { color: #555; }
+.popup-extra-tab.active {
+  color: #2980b9;
+  border-bottom-color: #2980b9;
+}
+
+.popup-extra-content {
+  margin-top: 6px;
+}
+
+.popup-weather {
+  margin: 0 0 8px 0;
+  padding: 8px 10px;
+  background: #f0f6ff;
+  border-radius: 6px;
+  border: 1px solid #d6e4f0;
+}
+
 .metar-cat {
   display: inline-block;
   padding: 1px 8px;
@@ -276,19 +355,6 @@ html, body {
 .metar-loading {
   color: #999;
   font-style: italic;
-}
-
-/* TAF toggle link */
-.popup-taf-toggle {
-  font-size: 12px;
-  font-weight: 600;
-  color: #2980b9;
-  cursor: pointer;
-  padding: 4px 0;
-}
-
-.popup-taf-toggle:hover {
-  text-decoration: underline;
 }
 
 /* TAF forecast bar in popup */
@@ -484,18 +550,6 @@ html, body {
 }
 
 /* Charts toggle link */
-.popup-charts-toggle {
-  font-size: 12px;
-  font-weight: 600;
-  color: #6a1b9a;
-  cursor: pointer;
-  padding: 4px 0;
-}
-
-.popup-charts-toggle:hover {
-  text-decoration: underline;
-}
-
 .popup-charts {
   margin: 4px 0 8px;
 }
@@ -605,6 +659,79 @@ html, body {
 
 .runway-table tr:last-child td {
   border-bottom: none;
+}
+
+/* Runway wind combined table */
+.runway-table-wind td {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+}
+
+.runway-table-wind td[rowspan] {
+  vertical-align: middle;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.rwy-wind-desig {
+  font-weight: 700;
+  color: #333;
+}
+
+.rwy-active {
+  background: #e8f5e9;
+}
+
+.rwy-active .rwy-wind-desig {
+  color: #2e7d32;
+}
+
+.rwy-worst {
+  background: #fde8e8;
+}
+
+.rwy-worst .rwy-wind-desig {
+  color: #c0392b;
+}
+
+.rwy-worst-badge {
+  font-size: 8px;
+  font-weight: 700;
+  background: #e74c3c;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 2px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.rwy-inuse {
+  font-size: 8px;
+  font-weight: 700;
+  background: #27ae60;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 2px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.rwy-head {
+  color: #27ae60;
+}
+
+.rwy-tail {
+  color: #e74c3c;
+}
+
+.rwy-xw-caution {
+  color: #e67e22;
+}
+
+.rwy-xw-warn {
+  color: #e74c3c;
+  font-weight: 700;
 }
 
 /* METAR category inline with airport code */
@@ -797,14 +924,11 @@ html, body {
 }
 
 .wx-icon {
-  width: 48px;
-  height: 48px;
-}
-
-.wx-location {
-  font-weight: 700;
-  font-size: 14px;
-  color: #222;
+  width: 52px;
+  height: 52px;
+  background: #87CEEB;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .wx-desc {
@@ -813,24 +937,89 @@ html, body {
   text-transform: capitalize;
 }
 
-.wx-details {
+.wx-temp-big {
+  font-size: 22px;
+  font-weight: 700;
+  color: #222;
+  line-height: 1.1;
+}
+
+.wx-chips {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+}
+
+.wx-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #f0f0f0;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #444;
+  white-space: nowrap;
+}
+
+.wx-hourly {
+  display: flex;
+  gap: 0;
   border-top: 1px solid #e0e0e0;
   padding-top: 6px;
 }
 
-.wx-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 2px;
-  font-size: 12px;
+.wx-hour {
+  flex: 1 1 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.3;
 }
 
-.wx-label {
-  flex-shrink: 0;
-  width: 60px;
+.wx-hour-time {
   font-weight: 600;
   color: #555;
+  font-size: 10px;
+  margin-bottom: 2px;
 }
+
+.wx-hour-icon {
+  width: 36px;
+  height: 36px;
+  display: block;
+  margin: 2px auto;
+  background: #87CEEB;
+  border-radius: 50%;
+}
+
+.wx-hour-temp {
+  font-weight: 700;
+  color: #222;
+}
+
+.wx-hour-wind {
+  color: #666;
+  font-size: 10px;
+}
+
+.wx-hour-pop {
+  color: #2980b9;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.wx-overview {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #f8f9fa;
+  border-radius: 5px;
+  border: 1px solid #e9ecef;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #444;
+}
+
+.popup-weather .wx-icon { width: 40px; height: 40px; }
+.popup-weather .wx-temp-big { font-size: 18px; }
 
 /* Route planner */
 .route-btn {
@@ -942,6 +1131,18 @@ html, body {
 .route-wp-code {
   font-family: 'SF Mono', 'Menlo', monospace;
   color: #2980b9;
+}
+
+.route-wp-code-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.route-wp-code-link:hover {
+  color: #1a5276;
+  text-decoration-style: solid;
 }
 
 .route-wp-remove {
@@ -1258,18 +1459,6 @@ html, body {
 }
 
 /* NOTAM toggle link */
-.popup-notam-toggle {
-  font-size: 12px;
-  font-weight: 600;
-  color: #c0392b;
-  cursor: pointer;
-  padding: 4px 0;
-}
-
-.popup-notam-toggle:hover {
-  text-decoration: underline;
-}
-
 /* NOTAM section in popup */
 .popup-notam {
   margin: 4px 0 8px;
@@ -1339,6 +1528,12 @@ html, body {
 
 .notam-badge-critical {
   background: #e74c3c;
+}
+.notam-badge .notam-svg {
+  color: #856404;
+}
+.notam-badge-critical .notam-svg {
+  color: #a02020;
 }
 
 /* NOTAM SVG icon */
@@ -1415,11 +1610,9 @@ html, body {
 }
 
 /* Route weather timeline */
-#route-wx-timeline {
-  margin-top: 6px;
+#rw-timeline {
+  margin-bottom: 8px;
   overflow-x: auto;
-  border-top: 1px solid #eee;
-  padding-top: 4px;
 }
 
 .route-wx-table {
@@ -1542,6 +1735,62 @@ html, body {
   border-color: #2980b9;
 }
 
+/* Weather time control bar */
+.wx-time-bar {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 6px 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+  font-size: 13px;
+  user-select: none;
+}
+
+.wx-time-btn {
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #333;
+  line-height: 1;
+  transition: background 0.1s;
+}
+
+.wx-time-btn:hover {
+  background: #ddd;
+}
+
+.wx-time-now {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  margin-left: 4px;
+  background: #2980b9;
+  color: #fff;
+  border-color: #2471a3;
+}
+
+.wx-time-now:hover {
+  background: #2471a3;
+}
+
+.wx-time-label {
+  min-width: 100px;
+  text-align: center;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 13px;
+}
+
 /* SWC control button */
 .swc-control a {
   display: flex;
@@ -1634,6 +1883,272 @@ html, body {
   max-width: 85vw;
   max-height: 80vh;
   display: block;
+}
+
+/* Route Weather floating panel */
+.route-wx-panel {
+  position: fixed;
+  bottom: 30px;
+  right: 300px;
+  width: 540px;
+  max-height: 80vh;
+  z-index: 2000;
+  background: rgba(255,255,255,0.97);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.route-wx-panel-hdr {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+}
+
+.route-wx-panel-tab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #888;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.route-wx-panel-tab:hover { color: #555; }
+
+.route-wx-panel-tab.active {
+  color: #2980b9;
+  border-bottom-color: #2980b9;
+}
+
+.route-wx-panel-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #999;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.route-wx-panel-close:hover { color: #333; }
+
+.route-wx-panel-body {
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.route-wx-panel-content {
+  /* shown/hidden via display:none */
+}
+
+/* Route panel weather/gramet buttons */
+.route-wx-btns {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.route-wx-btn {
+  flex: 1;
+  padding: 5px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f0f6ff;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 600;
+  color: #2980b9;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.route-wx-btn:hover {
+  background: #d6e8f8;
+}
+
+.route-wx-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Airgram vertical profile chart */
+.airgram-container { position: relative; margin: 6px 0; }
+.airgram-container canvas { width: 100%; display: block; border-radius: 4px; }
+.airgram-legend { display: flex; gap: 8px; font-size: 10px; color: #555; margin-top: 4px; align-items: center; flex-wrap: wrap; }
+.airgram-legend-item { display: flex; align-items: center; gap: 3px; }
+.airgram-legend-swatch { width: 14px; height: 10px; border-radius: 2px; border: 1px solid #ccc; }
+.airgram-tip { position: absolute; pointer-events: none; background: rgba(0,0,0,0.8); color: #fff; font-size: 11px; padding: 3px 7px; border-radius: 4px; white-space: nowrap; z-index: 10; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+
+/* Wind-adjusted totals in route list */
+.route-wind-line {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2980b9;
+  padding: 3px 0;
+  border-top: 1px dashed #ccc;
+  margin-top: 2px;
+}
+
+/* FL Compare table */
+.flcomp-ref {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2980b9;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background: #e8f0fe;
+  border-radius: 4px;
+  border-left: 3px solid #2980b9;
+}
+
+.flcomp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+}
+
+.flcomp-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.flcomp-table th {
+  background: #f5f5f5;
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  color: #555;
+  border-bottom: 2px solid #ddd;
+  white-space: nowrap;
+}
+
+.flcomp-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+}
+
+.flcomp-row:hover {
+  background: #f8f9ff;
+}
+
+.flcomp-fl {
+  font-weight: 700;
+  color: #333;
+}
+
+.flcomp-sel {
+  display: inline-block;
+  font-size: 8px;
+  font-weight: 700;
+  background: #2980b9;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
+.flcomp-wind {
+  color: #666;
+}
+
+.flcomp-hw {
+  color: #e74c3c;
+}
+
+.flcomp-tw {
+  color: #27ae60;
+}
+
+.flcomp-time {
+  color: #333;
+}
+
+.flcomp-fuel {
+  color: #333;
+}
+
+.flcomp-fuel-warn {
+  color: #e74c3c;
+  font-weight: 700;
+}
+
+.flcomp-diff {
+  font-size: 10px;
+  color: #888;
+}
+
+.flcomp-diff-good {
+  color: #27ae60;
+}
+
+.flcomp-diff-bad {
+  color: #e74c3c;
+}
+
+.flcomp-current {
+  background: #e8f0fe !important;
+  border-left: 3px solid #2980b9;
+}
+
+.flcomp-best-time {
+  background: #e8f8e8 !important;
+}
+
+.flcomp-best-fuel:not(.flcomp-best-time) {
+  background: #fef9e7 !important;
+}
+
+.flcomp-legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: #666;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.flcomp-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.flcomp-legend-swatch {
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid #ddd;
+}
+
+.flcomp-best-time-swatch {
+  background: #e8f8e8;
+}
+
+.flcomp-best-fuel-swatch {
+  background: #fef9e7;
+}
+
+.flcomp-current-swatch {
+  background: #e8f0fe;
+  border-left: 2px solid #2980b9;
 }
 
 .wind-barb-label {

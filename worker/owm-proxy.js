@@ -8,11 +8,28 @@ export default {
       return new Response(null, { headers: corsHeaders() });
     }
 
-    // Route: /tile/:layer/:z/:x/:y.png
+    // Route: /tile/:layer/:z/:x/:y.png (OWM 1.0 tiles)
     const tileMatch = path.match(/^\/tile\/([a-z_]+)\/(\d+)\/(\d+)\/(\d+)\.png$/);
     if (tileMatch) {
       const [, layer, z, x, y] = tileMatch;
       const upstream = `https://tile.openweathermap.org/map/${layer}/${z}/${x}/${y}.png?appid=${env.OWM_KEY}`;
+      const resp = await fetch(upstream, {
+        cf: { cacheTtl: 600, cacheEverything: true }
+      });
+      const headers = new Headers(resp.headers);
+      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      return new Response(resp.body, { status: resp.status, headers });
+    }
+
+    // Route: /tile2/:layer/:z/:x/:y.png (OWM 2.0 weather maps with arrows)
+    const tile2Match = path.match(/^\/tile2\/([A-Z_]+)\/(\d+)\/(\d+)\/(\d+)\.png$/);
+    if (tile2Match) {
+      const [, layer, z, x, y] = tile2Match;
+      const arrowStep = url.searchParams.get('arrow_step') || '16';
+      const useNorm = url.searchParams.get('use_norm') || 'true';
+      const date = url.searchParams.get('date') || '';
+      let upstream = `https://maps.openweathermap.org/maps/2.0/weather/${layer}/${z}/${x}/${y}?appid=${env.OWM_KEY}&arrow_step=${arrowStep}&use_norm=${useNorm}`;
+      if (date) upstream += `&date=${date}`;
       const resp = await fetch(upstream, {
         cf: { cacheTtl: 600, cacheEverything: true }
       });
@@ -127,47 +144,43 @@ export default {
       });
     }
 
-    // Route: /wind-grid?bbox=south,west,north,east&step=2
+    // Route: /wind-grid?bbox=south,west,north,east&step=2&latStep=0.67
     if (path === '/wind-grid') {
       const bbox = (url.searchParams.get('bbox') || '').split(',').map(Number);
       const step = parseFloat(url.searchParams.get('step')) || 2;
+      const latStep = parseFloat(url.searchParams.get('latStep')) || step;
       if (bbox.length !== 4 || bbox.some(isNaN)) {
         return jsonError('bbox=south,west,north,east required', 400);
       }
       const [south, west, north, east] = bbox;
       const points = [];
-      for (let lat = Math.ceil(south / step) * step; lat <= north; lat += step) {
+      for (let lat = Math.ceil(south / latStep) * latStep; lat <= north; lat += latStep) {
         for (let lon = Math.ceil(west / step) * step; lon <= east; lon += step) {
           points.push({ lat: Math.round(lat * 1000) / 1000, lon: Math.round(lon * 1000) / 1000 });
         }
       }
-      if (points.length > 100) {
+      if (points.length > 120) {
         return jsonError('Too many grid points (' + points.length + '), increase step', 400);
       }
 
-      const cache = caches.default;
+      // Fetch all points in parallel (no per-point caching to save subrequests)
       const results = await Promise.all(points.map(async (pt) => {
-        const cacheKey = new Request('https://wind-cache/' + pt.lat + '/' + pt.lon);
-        let resp = await cache.match(cacheKey);
-        if (!resp) {
-          const upstream = `https://api.openweathermap.org/data/2.5/weather?lat=${pt.lat}&lon=${pt.lon}&appid=${env.OWM_KEY}&units=metric`;
-          resp = await fetch(upstream);
-          const body = await resp.text();
-          resp = new Response(body, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=600' } });
-          await cache.put(cacheKey, resp.clone());
-        }
-        const data = await resp.json();
-        if (!data.wind) return null;
-        return {
-          lat: pt.lat, lon: pt.lon,
-          wind_speed: data.wind.speed,
-          wind_deg: data.wind.deg || 0,
-          wind_gust: data.wind.gust || null
-        };
+        const upstream = `https://api.openweathermap.org/data/2.5/weather?lat=${pt.lat}&lon=${pt.lon}&appid=${env.OWM_KEY}&units=metric`;
+        try {
+          const resp = await fetch(upstream, { cf: { cacheTtl: 600, cacheEverything: true } });
+          const data = await resp.json();
+          if (!data.wind) return null;
+          return {
+            lat: pt.lat, lon: pt.lon,
+            wind_speed: data.wind.speed,
+            wind_deg: data.wind.deg || 0,
+            wind_gust: data.wind.gust || null
+          };
+        } catch { return null; }
       }));
 
       return new Response(JSON.stringify(results.filter(Boolean)), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=600', ...corsHeaders() }
       });
     }
 
@@ -180,6 +193,36 @@ export default {
       }
       const upstream = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric`;
       const resp = await fetch(upstream);
+      const headers = new Headers(resp.headers);
+      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      headers.set('Content-Type', 'application/json');
+      return new Response(resp.body, { status: resp.status, headers });
+    }
+
+    // Route: /onecall?lat=...&lon=... (One Call 3.0 — current + hourly)
+    if (path === '/onecall') {
+      const lat = url.searchParams.get('lat');
+      const lon = url.searchParams.get('lon');
+      if (!lat || !lon || isNaN(lat) || isNaN(lon)) {
+        return jsonError('lat and lon required', 400);
+      }
+      const upstream = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric&exclude=minutely,daily,alerts`;
+      const resp = await fetch(upstream, { cf: { cacheTtl: 600, cacheEverything: true } });
+      const headers = new Headers(resp.headers);
+      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      headers.set('Content-Type', 'application/json');
+      return new Response(resp.body, { status: resp.status, headers });
+    }
+
+    // Route: /wx-overview?lat=...&lon=... (One Call 3.0 weather overview)
+    if (path === '/wx-overview') {
+      const lat = url.searchParams.get('lat');
+      const lon = url.searchParams.get('lon');
+      if (!lat || !lon || isNaN(lat) || isNaN(lon)) {
+        return jsonError('lat and lon required', 400);
+      }
+      const upstream = `https://api.openweathermap.org/data/3.0/onecall/overview?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric`;
+      const resp = await fetch(upstream, { cf: { cacheTtl: 1800, cacheEverything: true } });
       const headers = new Headers(resp.headers);
       Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
       headers.set('Content-Type', 'application/json');

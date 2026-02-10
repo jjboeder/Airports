@@ -62,8 +62,8 @@
   // Inline SVG ice crystal icon
   var ICE_SVG = '<svg class="ice-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="1" x2="8" y2="15"/><line x1="1" y1="8" x2="15" y2="8"/><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/><line x1="8" y1="1" x2="6" y2="3"/><line x1="8" y1="1" x2="10" y2="3"/><line x1="8" y1="15" x2="6" y2="13"/><line x1="8" y1="15" x2="10" y2="13"/></svg>';
 
-  // Inline SVG NOTAM exclamation triangle icon (amber warning)
-  var NOTAM_SVG = '<svg class="notam-svg" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l7 14H1L8 1zm0 4v5h0V5zm0 7a1 1 0 100-2 1 1 0 000 2z"/></svg>';
+  // Inline SVG NOTAM square icon with "N"
+  var NOTAM_SVG = '<svg class="notam-svg" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="currentColor"/><text x="8" y="12.5" text-anchor="middle" font-size="11" font-weight="700" font-family="sans-serif" fill="#fff">N</text></svg>';
 
   // NOTAM API via worker proxy
 
@@ -404,21 +404,28 @@
     html += '<span class="metar-loading">Loading METAR...</span>';
     html += '</div>';
 
-    // --- TAF forecast (hidden by default, revealed on click) ---
-    html += '<div class="popup-taf-toggle" data-icao="' + escapeHtml(gpsCode || ident) + '">Show TAF</div>';
-    html += '<div class="popup-taf" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;"></div>';
+    // --- Tab row ---
+    var icaoSafe = escapeHtml(gpsCode || ident);
+    var icaoRaw = gpsCode || ident;
+    var icaoEnc = encodeURIComponent(icaoRaw);
+    html += '<div class="popup-extra-tabs">';
+    html += '<button class="popup-extra-tab active" data-panel="popup-info">Info</button>';
+    html += '<button class="popup-extra-tab" data-panel="popup-taf">TAF</button>';
+    html += '<button class="popup-extra-tab" data-panel="popup-weather">Weather</button>';
+    html += '<button class="popup-extra-tab" data-panel="popup-notam">NOTAMs</button>';
+    html += '<button class="popup-extra-tab" data-panel="popup-charts">Charts</button>';
+    html += '<button class="popup-extra-tab" data-panel="popup-airgram">Airgram</button>';
+    if (runways.length > 0) {
+      html += '<button class="popup-extra-tab" data-panel="popup-runways">Runways</button>';
+    }
+    html += '</div>';
 
-    // --- NOTAMs (toggle hidden until we know NOTAMs exist) ---
-    html += '<div class="popup-notam-toggle" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;">Show NOTAMs</div>';
-    html += '<div class="popup-notam" data-icao="' + escapeHtml(gpsCode || ident) + '" style="display:none;"></div>';
-
-    // --- Info grid ---
+    // --- Info tab (default open) ---
+    html += '<div class="popup-info popup-extra-content">';
     html += '<div class="popup-info-grid">';
-
     var atcDisp = ATC_DISPLAY[atcLevel] || ATC_DISPLAY['UNCONTROLLED'];
     html += '<div class="info-row"><span class="info-label">ATC</span>';
     html += '<span class="info-value ' + atcDisp.css + '">' + atcDisp.label + '</span></div>';
-
     if (frequencies.length > 0) {
       html += '<div class="info-row info-row-freqs"><span class="info-label">Freq</span><span class="info-value freq-list">';
       for (var f = 0; f < frequencies.length; f++) {
@@ -427,27 +434,19 @@
       }
       html += '</span></div>';
     }
-
     var fuel = estimateFuel(row);
     html += '<div class="info-row"><span class="info-label">Fuel</span>';
     html += fuel ? '<span class="info-value">' + fuel.join(', ') + '</span>' : '<span class="info-value info-unknown">No data</span>';
     html += '</div>';
-
     var hours = estimateHours(row);
     html += '<div class="info-row"><span class="info-label">Hours</span>';
     html += hours ? '<span class="info-value">' + hours + '</span>' : '<span class="info-value info-unknown">No data</span>';
     html += '</div>';
-
     var parking = estimateParking(row);
     html += '<div class="info-row"><span class="info-label">Parking</span>';
     html += parking ? '<span class="info-value">' + parking + '</span>' : '<span class="info-value info-unknown">No data</span>';
     html += '</div>';
-
     html += '</div>';
-
-    // --- Links ---
-    var icaoRaw = gpsCode || ident;
-    var icaoEnc = encodeURIComponent(icaoRaw);
     html += '<div class="popup-links">';
     html += '<a class="popup-link aip-link" data-icao="' + escapeHtml(icaoRaw) + '" style="display:none" target="_blank" rel="noopener">AIP</a>';
     html += '<a href="https://www.google.com/search?q=' + icaoEnc + '+airport" target="_blank" rel="noopener" class="popup-link google-link">Google</a>';
@@ -455,15 +454,19 @@
     html += '<a href="https://ourairports.com/airports/' + icaoEnc + '/" target="_blank" rel="noopener" class="popup-link oa-link">OurAirports</a>';
     html += '<a href="https://www.windy.com/' + lat + '/' + lon + '?detail=true" target="_blank" rel="noopener" class="popup-link windy-link">Windy</a>';
     html += '</div>';
+    html += '</div>';
 
-    // --- Charts toggle ---
-    html += '<div class="popup-charts-toggle" data-icao="' + escapeHtml(icaoRaw) + '">Show Charts</div>';
-    html += '<div class="popup-charts" data-icao="' + escapeHtml(icaoRaw) + '" style="display:none;"></div>';
+    // --- TAF / Weather / NOTAMs / Charts / Airgram tabs ---
+    html += '<div class="popup-taf popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
+    html += '<div class="popup-weather popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" style="display:none;"></div>';
+    html += '<div class="popup-notam popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
+    html += '<div class="popup-charts popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
+    html += '<div class="popup-airgram popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" style="display:none;"></div>';
 
-    // --- Runways ---
+    // --- Runways tab ---
     if (runways.length > 0) {
-      html += '<div class="popup-runways"><div class="popup-runways-title">Runways</div>';
-      html += '<table class="runway-table"><thead><tr><th>RWY</th><th>Length</th><th>Width</th><th>Surface</th></tr></thead><tbody>';
+      html += '<div class="popup-runways popup-extra-content" style="display:none;">';
+      html += '<table class="runway-table" data-icao="' + escapeHtml(gpsCode || ident) + '"><thead><tr><th>RWY</th><th>Length</th><th>Width</th><th>Surface</th></tr></thead><tbody>';
       for (var i = 0; i < runways.length; i++) {
         var rwy = runways[i];
         html += '<tr>';
@@ -473,7 +476,8 @@
         html += '<td>' + escapeHtml(rwy[RWY.surface]) + '</td>';
         html += '</tr>';
       }
-      html += '</tbody></table></div>';
+      html += '</tbody></table>';
+      html += '</div>';
     }
 
     html += '</div>';
@@ -617,6 +621,123 @@
       html += '<div class="metar-decoded">' + parts.join(' &middot; ') + '</div>';
     }
     el.innerHTML = html;
+
+    // Update runway wind components in the same popup
+    var icao = el.getAttribute('data-icao');
+    if (icao) {
+      var popup = el.closest('.popup-content');
+      if (popup) renderRunwayWind(popup, icao);
+    }
+  }
+
+  // --- Runway wind components from METAR ---
+  function parseRunwayEnds(designator) {
+    // "04/22" → [{name:'04', hdg:40}, {name:'22', hdg:220}]
+    // "09R/27L" → [{name:'09R', hdg:90}, {name:'27L', hdg:270}]
+    var parts = designator.split('/');
+    var ends = [];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i].trim();
+      var m = p.match(/^(\d{1,2})/);
+      if (m) {
+        ends.push({ name: p, hdg: parseInt(m[1], 10) * 10 });
+      }
+    }
+    return ends;
+  }
+
+  function renderRunwayWind(popupEl, icao) {
+    var metar = metarCache[icao];
+    if (!metar || metar.wdir == null || metar.wdir === 'VRB' || metar.wspd == null) return;
+
+    var rwyTable = popupEl.querySelector('.runway-table[data-icao="' + icao + '"]');
+    if (!rwyTable) return;
+    // Don't re-render if already combined
+    if (rwyTable.classList.contains('runway-table-wind')) return;
+
+    // Collect runway data from the existing table rows
+    var rows = rwyTable.querySelectorAll('tbody tr');
+    var runways = []; // { desig, length, width, surface, ends: [{name, hdg}] }
+    for (var i = 0; i < rows.length; i++) {
+      var tds = rows[i].querySelectorAll('td');
+      if (tds.length < 4) continue;
+      var desig = tds[0].textContent.trim();
+      runways.push({
+        desig: desig,
+        length: tds[1].textContent.trim(),
+        width: tds[2].textContent.trim(),
+        surface: tds[3].textContent.trim(),
+        ends: parseRunwayEnds(desig)
+      });
+    }
+    if (runways.length === 0) return;
+
+    var wdir = metar.wdir;
+    var wspd = metar.wspd;
+    var wgst = metar.wgst || 0;
+    var DEG = Math.PI / 180;
+
+    // Compute wind components for each runway end, track global best
+    var allEnds = [];
+    for (var r = 0; r < runways.length; r++) {
+      for (var j = 0; j < runways[r].ends.length; j++) {
+        var e = runways[r].ends[j];
+        var angleDiff = (wdir - e.hdg) * DEG;
+        e.headwind = wspd * Math.cos(angleDiff);
+        e.crosswind = wspd * Math.sin(angleDiff);
+        e.gustXwind = wgst > 0 ? wgst * Math.sin(angleDiff) : null;
+        e.rwyIdx = r;
+        allEnds.push(e);
+      }
+    }
+    var bestIdx = 0, worstIdx = 0;
+    var bestHeadwind = -Infinity, worstHeadwind = Infinity;
+    for (var i = 0; i < allEnds.length; i++) {
+      if (allEnds[i].headwind > bestHeadwind) { bestHeadwind = allEnds[i].headwind; bestIdx = i; }
+      if (allEnds[i].headwind < worstHeadwind) { worstHeadwind = allEnds[i].headwind; worstIdx = i; }
+    }
+    var bestName = allEnds[bestIdx].name;
+    var worstName = allEnds.length > 2 ? allEnds[worstIdx].name : null;
+
+    // Build combined table replacing the original
+    var html = '<table class="runway-table runway-table-wind">';
+    html += '<thead><tr><th>RWY</th><th>Length</th><th>Surface</th><th>Head/Tail</th><th>Xwind</th></tr></thead><tbody>';
+    for (var r = 0; r < runways.length; r++) {
+      var rw = runways[r];
+      var ends = rw.ends;
+      var span = ends.length || 1;
+      for (var j = 0; j < ends.length; j++) {
+        var e = ends[j];
+        var isBest = (e.name === bestName);
+        var isWorst = (e.name === worstName);
+        var hw = Math.round(Math.abs(e.headwind));
+        var xw = Math.round(Math.abs(e.crosswind));
+        var hwLabel = e.headwind >= 0 ? 'Head ' + hw : 'Tail ' + hw;
+        var hwClass = e.headwind >= 0 ? 'rwy-head' : 'rwy-tail';
+        var xwSide = e.crosswind > 0.5 ? 'R' : (e.crosswind < -0.5 ? 'L' : '');
+        var xwStr = xwSide + ' ' + xw + ' kt';
+        if (e.gustXwind != null && Math.abs(e.gustXwind) > Math.abs(e.crosswind)) {
+          xwStr += ' (G' + Math.round(Math.abs(e.gustXwind)) + ')';
+        }
+        var xwClass = xw > 15 ? 'rwy-xw-warn' : (xw > 10 ? 'rwy-xw-caution' : '');
+        var rowClass = isBest ? 'rwy-active' : (isWorst ? 'rwy-worst' : '');
+        var badge = isBest ? ' <span class="rwy-inuse">BEST</span>' : (isWorst ? ' <span class="rwy-worst-badge">WORST</span>' : '');
+
+        html += '<tr class="' + rowClass + '">';
+        html += '<td class="rwy-wind-desig">' + escapeHtml(e.name) + badge + '</td>';
+        if (j === 0) {
+          html += '<td rowspan="' + span + '">' + rw.length + '</td>';
+          html += '<td rowspan="' + span + '">' + rw.surface + '</td>';
+        }
+        html += '<td class="' + hwClass + '">' + hwLabel + ' kt</td>';
+        html += '<td class="' + xwClass + '">' + xwStr + '</td>';
+        html += '</tr>';
+      }
+    }
+    html += '</tbody></table>';
+
+    // Replace the original runway table with the combined one
+    rwyTable.outerHTML = html;
   }
 
   // --- Fetch single METAR for popup ---
@@ -1201,7 +1322,9 @@
           marker.bindPopup(buildPopupContent(row), {
             maxWidth: 620,
             minWidth: 450,
-            className: 'airport-popup'
+            className: 'airport-popup',
+            autoPan: true,
+            autoPanPadding: [40, 40]
           });
 
           var tip = code + ' ' + (row[COL.name] || '');
@@ -1270,15 +1393,18 @@
           var popup = e.popup;
           var el = popup.getElement();
           if (!el) return;
+
+
           var metarDiv = el.querySelector('.popup-metar');
           if (!metarDiv) return;
           var icao = metarDiv.getAttribute('data-icao');
 
-          var tafToggle = el.querySelector('.popup-taf-toggle');
           var tafDiv = el.querySelector('.popup-taf');
+          var wxDiv = el.querySelector('.popup-weather');
+          var notamDiv = el.querySelector('.popup-notam');
 
-          // Use combo METAR+TAF endpoint (falls back to VATSIM on error)
-          if (icao) fetchMetarTafCombo(metarDiv, tafToggle, tafDiv, icao);
+          // Fetch METAR only (TAF lazy-loaded on tab click)
+          if (icao) fetchMetarTafCombo(metarDiv, null, tafDiv, icao);
 
           // Populate AIP link
           var aipLink = el.querySelector('.aip-link');
@@ -1298,46 +1424,95 @@
             }
           }
 
-          if (tafToggle && tafDiv) {
-            tafToggle.addEventListener('click', function () {
-              tafDiv.style.display = '';
-              tafToggle.style.display = 'none';
-              var tafIcao = tafDiv.getAttribute('data-icao');
-              if (tafIcao) {
-                // Show raw TAF immediately if we got it from combo endpoint
-                if (rawTafCache[tafIcao]) {
-                  tafDiv.innerHTML = '<div class="taf-header">TAF</div><div class="taf-raw">' + escapeHtml(rawTafCache[tafIcao]) + '</div>';
-                } else {
-                  tafDiv.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
+          // Tab switching
+          var extraTabs = el.querySelectorAll('.popup-extra-tab');
+          var extraPanels = el.querySelectorAll('.popup-extra-content');
+          var loadedPanels = { 'popup-info': true };
+
+          extraTabs.forEach(function (tab) {
+            tab.addEventListener('click', function () {
+              var target = tab.getAttribute('data-panel');
+              var isActive = tab.classList.contains('active');
+
+              // Deactivate all
+              extraTabs.forEach(function (t) { t.classList.remove('active'); });
+              extraPanels.forEach(function (p) { p.style.display = 'none'; });
+
+              // If clicking already-active tab, just close
+              if (isActive) return;
+
+              // Activate clicked tab
+              tab.classList.add('active');
+              var panel = el.querySelector('.' + target);
+              if (panel) panel.style.display = '';
+
+              // Lazy-load content on first open
+              if (!loadedPanels[target]) {
+                loadedPanels[target] = true;
+                if (target === 'popup-taf' && tafDiv) {
+                  var tafIcao = tafDiv.getAttribute('data-icao');
+                  if (tafIcao) {
+                    if (rawTafCache[tafIcao]) {
+                      tafDiv.innerHTML = '<div class="taf-header">TAF</div><div class="taf-raw">' + escapeHtml(rawTafCache[tafIcao]) + '</div>';
+                    } else {
+                      tafDiv.innerHTML = '<span class="metar-loading">Loading TAF...</span>';
+                    }
+                    fetchTafForPopup(tafDiv, tafIcao);
+                  }
+                } else if (target === 'popup-weather' && wxDiv && window.AirportApp.fetchWeatherInto) {
+                  var wLat = wxDiv.getAttribute('data-lat');
+                  var wLon = wxDiv.getAttribute('data-lon');
+                  window.AirportApp.fetchWeatherInto(wxDiv, wLat, wLon);
+                } else if (target === 'popup-notam' && notamDiv) {
+                  var nIcao = notamDiv.getAttribute('data-icao');
+                  if (nIcao) {
+                    notamDiv.innerHTML = '<span class="metar-loading">Loading NOTAMs...</span>';
+                    fetchNotamForPopup(notamDiv, nIcao);
+                  }
+                } else if (target === 'popup-charts') {
+                  var cDiv = el.querySelector('.popup-charts');
+                  if (cDiv) {
+                    var cIcao = cDiv.getAttribute('data-icao');
+                    if (cIcao) {
+                      if (chartsCache[cIcao]) {
+                        renderChartsInPopup(cDiv, cIcao, chartsCache[cIcao]);
+                      } else {
+                        cDiv.innerHTML = '<span class="metar-loading">Loading charts...</span>';
+                        fetch(OWM_PROXY + '/ar/airport-docs/' + encodeURIComponent(cIcao))
+                          .then(function (res) { return res.json(); })
+                          .then(function (data) {
+                            var d = Array.isArray(data) ? data[0] : data;
+                            chartsCache[cIcao] = d;
+                            renderChartsInPopup(cDiv, cIcao, d);
+                          })
+                          .catch(function () {
+                            cDiv.innerHTML = '<span class="info-unknown">Charts not available</span>';
+                          });
+                      }
+                    }
+                  }
+                } else if (target === 'popup-airgram') {
+                  var agDiv = el.querySelector('.popup-airgram');
+                  if (agDiv && window.AirportApp.fetchAirgramInto) {
+                    var aLat = agDiv.getAttribute('data-lat');
+                    var aLon = agDiv.getAttribute('data-lon');
+                    window.AirportApp.fetchAirgramInto(agDiv, aLat, aLon);
+                  }
+                } else if (target === 'popup-runways') {
+                  var popupContent = el.querySelector('.popup-content');
+                  if (popupContent && icao) renderRunwayWind(popupContent, icao);
                 }
-                // Always fetch structured TAF for the hourly timeline visualization
-                fetchTafForPopup(tafDiv, tafIcao);
               }
             });
-          }
+          });
 
-          var notamToggle = el.querySelector('.popup-notam-toggle');
-          var notamDiv = el.querySelector('.popup-notam');
-          if (notamToggle && notamDiv) {
-            notamToggle.addEventListener('click', function () {
-              notamDiv.style.display = '';
-              notamToggle.style.display = 'none';
-              var notamIcao = notamDiv.getAttribute('data-icao');
-              if (notamIcao) {
-                notamDiv.innerHTML = '<span class="metar-loading">Loading NOTAMs...</span>';
-                fetchNotamForPopup(notamDiv, notamIcao);
-              }
-            });
-          }
-
-          // Pre-fetch NOTAMs to show warning in title and reveal toggle
+          // Pre-fetch NOTAMs to show warning badge in title
           var nameEl = el.querySelector('.popup-name');
           if (icao && nameEl) {
             var cachedNotam = notamCache[icao];
             if (cachedNotam && !isNotamStale(icao)) {
               if (cachedNotam.count > 0) {
                 nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + cachedNotam.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
-                if (notamToggle) notamToggle.style.display = '';
               }
             } else {
               fetchNotams(icao)
@@ -1347,39 +1522,10 @@
                   notamCacheTime[icao] = Date.now();
                   if (data.count > 0 && nameEl) {
                     nameEl.insertAdjacentHTML('beforeend', ' <span class="notam-warning" title="' + data.count + ' active NOTAM(s)">' + NOTAM_SVG + '</span>');
-                    if (notamToggle) notamToggle.style.display = '';
                   }
                 })
                 .catch(function () { /* silently skip */ });
             }
-          }
-
-          // Charts toggle
-          var chartsToggle = el.querySelector('.popup-charts-toggle');
-          var chartsDiv = el.querySelector('.popup-charts');
-          if (chartsToggle && chartsDiv) {
-            chartsToggle.addEventListener('click', function () {
-              chartsDiv.style.display = '';
-              chartsToggle.style.display = 'none';
-              var chartsIcao = chartsDiv.getAttribute('data-icao');
-              if (chartsIcao) {
-                if (chartsCache[chartsIcao]) {
-                  renderChartsInPopup(chartsDiv, chartsIcao, chartsCache[chartsIcao]);
-                } else {
-                  chartsDiv.innerHTML = '<span class="metar-loading">Loading charts...</span>';
-                  fetch(OWM_PROXY + '/ar/airport-docs/' + encodeURIComponent(chartsIcao))
-                    .then(function (res) { return res.json(); })
-                    .then(function (data) {
-                      var d = Array.isArray(data) ? data[0] : data;
-                      chartsCache[chartsIcao] = d;
-                      renderChartsInPopup(chartsDiv, chartsIcao, d);
-                    })
-                    .catch(function () {
-                      chartsDiv.innerHTML = '<span class="info-unknown">Charts not available</span>';
-                    });
-                }
-              }
-            });
           }
 
           // Set range origin to the airport location (skip in route mode)

@@ -24,6 +24,32 @@
 <body>
   <div id="map"></div>
 
+  <!-- Weather time control bar -->
+  <div id="wx-time-bar" class="wx-time-bar" style="display:none;">
+    <button id="wx-time-back" class="wx-time-btn" title="Back 3 hours">&laquo;</button>
+    <button id="wx-time-back1" class="wx-time-btn" title="Back 1 step">&lsaquo;</button>
+    <span id="wx-time-label" class="wx-time-label">Now</span>
+    <button id="wx-time-fwd1" class="wx-time-btn" title="Forward 1 step">&rsaquo;</button>
+    <button id="wx-time-fwd" class="wx-time-btn" title="Forward 3 hours">&raquo;</button>
+    <button id="wx-time-now" class="wx-time-btn wx-time-now" title="Reset to now">Now</button>
+  </div>
+
+  <!-- Route Weather floating panel -->
+  <div id="route-wx-panel" class="route-wx-panel" style="display:none;">
+    <div class="route-wx-panel-hdr">
+      <button class="route-wx-panel-tab active" data-rwtab="rw-airgram">Airgram</button>
+      <button class="route-wx-panel-tab" data-rwtab="rw-gramet">GRAMET</button>
+      <button class="route-wx-panel-tab" data-rwtab="rw-flcomp">FL Compare</button>
+      <span style="flex:1"></span>
+      <button class="route-wx-panel-close">&times;</button>
+    </div>
+    <div class="route-wx-panel-body">
+      <div id="rw-airgram" class="route-wx-panel-content"></div>
+      <div id="rw-gramet" class="route-wx-panel-content" style="display:none;"></div>
+      <div id="rw-flcomp" class="route-wx-panel-content" style="display:none;"></div>
+    </div>
+  </div>
+
   <!-- SWC floating panel -->
   <div id="swc-panel" class="swc-panel" style="display:none;">
     <div class="swc-panel-hdr">
@@ -42,7 +68,9 @@
     <div id="search-results"></div>
   </div>
 
+  <div id="legend-min" class="panel-mini panel-mini-left" title="Legend">&#9432;</div>
   <div id="legend" class="panel">
+    <button class="panel-minimize" data-target="legend" data-mini="legend-min" title="Minimize">&minus;</button>
     <h3>Airport Types</h3>
     <div class="legend-item">
       <span class="legend-dot" style="background:#e74c3c; width:12px; height:12px;"></span>
@@ -83,6 +111,7 @@
     </div>
   </div>
 
+  <div id="da62-min" class="panel-mini panel-mini-right" title="DA62">&#9992;</div>
   <div id="da62-panel" class="panel">
     <div class="panel-tabs">
       <button class="panel-tab active" data-tab="tab-range">Range</button>
@@ -91,6 +120,7 @@
       <span class="panel-tab-spacer"></span>
       <button id="settings-save" class="panel-io-btn" title="Save settings to file">&#x2B07;</button>
       <button id="settings-load" class="panel-io-btn" title="Load settings from file">&#x2B06;</button>
+      <button class="panel-minimize panel-io-btn" data-target="da62-panel" data-mini="da62-min" title="Minimize">&minus;</button>
       <input type="file" id="settings-file" accept=".json" style="display:none">
     </div>
 
@@ -120,7 +150,6 @@
       </div>
       <div id="route-waypoints"></div>
       <div id="route-totals"></div>
-      <div id="route-wx-timeline"></div>
       <div class="route-actions">
         <button id="route-undo" class="route-btn route-btn-sm" disabled>Undo Last</button>
         <button id="route-clear" class="route-btn route-btn-sm" disabled>Clear Route</button>
