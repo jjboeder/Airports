@@ -488,6 +488,7 @@ Format your briefing with these sections (use ## headings):
 ## Forecast
 ## En-Route Weather (route briefings only)
 ## Destination (route briefings only)
+## Alternate (route briefings only, if alternate airport designated)
 ## NOTAMs (if any provided)
 ## Flight Level Recommendation (route briefings only, if FL compare data provided)
 ## Summary & Recommendations
@@ -548,7 +549,11 @@ ${flCompStr}
 
 Destination:
 TAF: ${(d.destination && d.destination.taf) || 'Not available'}
-NOTAMs: ${d.destination && d.destination.notams && d.destination.notams.length > 0 ? d.destination.notams.map(n => n.id + ': ' + n.text).join('\n') : 'None'}`;
+NOTAMs: ${d.destination && d.destination.notams && d.destination.notams.length > 0 ? d.destination.notams.map(n => n.id + ': ' + n.text).join('\n') : 'None'}
+
+Alternate Airport: ${d.alternate ? d.alternate.code : 'None designated'}${d.alternate ? `
+Alternate TAF: ${d.alternate.taf || 'Not available'}
+Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alternate.notams.map(n => n.id + ': ' + n.text).join('\n') : 'None'}` : ''}`;
         } else {
           return jsonError('type must be "airport" or "route"', 400);
         }
@@ -774,6 +779,47 @@ NOTAMs: ${d.destination && d.destination.notams && d.destination.notams.length >
         });
       } catch (e) {
         return jsonError('navaids fetch error: ' + e.message, 502);
+      }
+    }
+
+    // Route: /airport?icao=EFHK (OpenAIP single airport lookup)
+    if (path === '/airport') {
+      const icao = (url.searchParams.get('icao') || '').toUpperCase();
+      if (!/^[A-Z]{4}$/.test(icao)) {
+        return jsonError('icao must be a 4-letter ICAO code', 400);
+      }
+
+      const cache = caches.default;
+      const cacheKey = new Request('https://openaip-airport-cache/' + icao);
+      let cached = await cache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+
+      try {
+        const upstream = `https://api.core.openaip.net/api/airports?search=${icao}&limit=5`;
+        const resp = await fetch(upstream, {
+          headers: { 'x-openaip-api-key': env.OPENAIP_KEY }
+        });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          return jsonError('OpenAIP airport error: ' + resp.status + ' ' + errText, 502);
+        }
+        const data = await resp.json();
+        const match = (data.items || []).find(a => a.icaoCode === icao);
+        const body = JSON.stringify(match || null);
+        const cacheResp = new Response(body, {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' }
+        });
+        await cache.put(cacheKey, cacheResp.clone());
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
+        });
+      } catch (e) {
+        return jsonError('OpenAIP airport error: ' + e.message, 502);
       }
     }
 

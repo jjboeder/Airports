@@ -67,6 +67,7 @@
   var arDestWp = null;         // full waypoint data for dest
   var arOptimizeIdx = 0;       // cycle optimization: 0=fuel, 1=time
   var AR_OPTIMIZE = ['fuel', 'time'];
+  var arSavedAlternate = null; // saved alternate wp to re-append after autoroute
 
   // --- DOM refs ---
   var toggleBtn, settingsDiv, waypointsDiv, totalsDiv, undoBtn, clearBtn;
@@ -1843,8 +1844,10 @@
       }
     }
 
-    // Destination data
-    var destCode = waypoints[waypoints.length - 1].code;
+    // Destination data (if alternate is set, dest is the waypoint before it)
+    var destIdx = (alternateIndex >= 0 && alternateIndex < waypoints.length) ? alternateIndex - 1 : waypoints.length - 1;
+    if (destIdx < 0) destIdx = waypoints.length - 1;
+    var destCode = waypoints[destIdx].code;
     var destTaf = app.rawTafCache && app.rawTafCache[destCode] ? app.rawTafCache[destCode] : null;
     if (!destTaf) {
       var taf = routeWxCache[destCode] || (app.tafCache && app.tafCache[destCode]);
@@ -1856,6 +1859,25 @@
         var n = app.notamCache[destCode].notams[i];
         destNotams.push({ id: n.id, text: n.text });
       }
+    }
+
+    // Alternate data
+    var altData = null;
+    if (alternateIndex >= 0 && alternateIndex < waypoints.length) {
+      var altCode = waypoints[alternateIndex].code;
+      var altTaf = app.rawTafCache && app.rawTafCache[altCode] ? app.rawTafCache[altCode] : null;
+      if (!altTaf) {
+        var taf2 = routeWxCache[altCode] || (app.tafCache && app.tafCache[altCode]);
+        if (taf2 && taf2.length && taf2[0].rawTAF) altTaf = taf2[0].rawTAF;
+      }
+      var altNotams = [];
+      if (app.notamCache && app.notamCache[altCode] && app.notamCache[altCode].notams) {
+        for (var i = 0; i < app.notamCache[altCode].notams.length; i++) {
+          var n = app.notamCache[altCode].notams[i];
+          altNotams.push({ id: n.id, text: n.text });
+        }
+      }
+      altData = { code: altCode, taf: altTaf, notams: altNotams };
     }
 
     // En-route weather samples from OWM cache
@@ -2045,6 +2067,7 @@
         departure: { metar: depMetar, taf: depTaf, notams: depNotams },
         enroute: enroute,
         destination: { taf: destTaf, notams: destNotams },
+        alternate: altData,
         airgramSummary: airgramSummary,
         flCompare: flCompare
       }
@@ -3601,13 +3624,23 @@
       return;
     }
 
-    // Lock dep/dest from first and last waypoint
+    // Lock dep/dest — if alternate is set, destination is the waypoint before it
     var dep = waypoints[0].code;
-    var dest = waypoints[waypoints.length - 1].code;
+    var destIdx = (alternateIndex >= 0 && alternateIndex < waypoints.length) ? alternateIndex - 1 : waypoints.length - 1;
+    if (destIdx < 1) destIdx = waypoints.length - 1;
+    var dest = waypoints[destIdx].code;
     arDepCode = dep;
     arDestCode = dest;
     arDepWp = { latlng: waypoints[0].latlng, data: waypoints[0].data, code: dep, name: waypoints[0].name };
-    arDestWp = { latlng: waypoints[waypoints.length - 1].latlng, data: waypoints[waypoints.length - 1].data, code: dest, name: waypoints[waypoints.length - 1].name };
+    arDestWp = { latlng: waypoints[destIdx].latlng, data: waypoints[destIdx].data, code: dest, name: waypoints[destIdx].name };
+    // Save alternate waypoint to re-append after autoroute
+    var savedAlternate = (alternateIndex >= 0 && alternateIndex < waypoints.length) ? {
+      latlng: waypoints[alternateIndex].latlng,
+      data: waypoints[alternateIndex].data,
+      code: waypoints[alternateIndex].code,
+      name: waypoints[alternateIndex].name
+    } : null;
+    arSavedAlternate = savedAlternate;
 
     // Cycle optimization on each click
     var optimize = AR_OPTIMIZE[arOptimizeIdx % AR_OPTIMIZE.length];
@@ -3794,6 +3827,13 @@
           ifrType: fplType
         });
       }
+    }
+
+    // Re-append saved alternate airport
+    if (arSavedAlternate) {
+      waypoints.push(arSavedAlternate);
+      alternateIndex = waypoints.length - 1;
+      arSavedAlternate = null;
     }
 
     if (!routeActive) startRoute();

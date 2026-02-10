@@ -76,6 +76,91 @@
   var NOTAM_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
   var chartsCache = {}; // icao → airport docs JSON
 
+  // OpenAIP airport cache: icao → { data, time }
+  var openaipCache = {};
+  var OPENAIP_CACHE_AGE = 60 * 60 * 1000; // 1 hour
+
+  var FUEL_LABELS = {
+    0: 'Super PLUS', 1: 'AVGAS', 2: 'Jet A', 3: 'JET A-1',
+    4: 'Jet B', 5: 'Diesel', 6: 'AVGAS UL91'
+  };
+
+  var HANDLING_LABELS = {
+    0: 'Cargo', 1: 'De-icing', 2: 'Maintenance', 3: 'Security', 4: 'Shelter'
+  };
+
+  var PASSENGER_LABELS = {
+    0: 'Bank', 1: 'Post Office', 2: 'Customs', 3: 'Lodging',
+    4: 'Medical', 5: 'Restaurant', 6: 'Sanitation', 7: 'Transport',
+    8: 'Laundry', 9: 'Camping'
+  };
+
+  var IAA_LABELS = {
+    0: 'ILS', 1: 'LOC', 2: 'LDA', 3: 'Locator', 4: 'DME', 5: 'GP'
+  };
+
+  var VAA_LABELS = {
+    0: 'VASI', 1: 'PAPI', 2: 'T-VASI', 3: 'P-VASI', 4: 'AEOS'
+  };
+
+  var SURFACE_COMP = {
+    0: 'Asphalt', 1: 'Concrete', 2: 'Grass', 3: 'Sand', 4: 'Water',
+    5: 'Macadam', 6: 'Stone', 7: 'Coral', 8: 'Clay', 9: 'Laterite',
+    10: 'Gravel', 11: 'Earth', 12: 'Ice', 13: 'Snow', 14: 'Rubber',
+    15: 'Metal', 16: 'Landing Mat', 17: 'PSP', 18: 'Wood', 19: 'Non-Bituminous'
+  };
+
+  var SURFACE_COND = { 0: 'Good', 1: 'Fair', 2: 'Poor', 3: 'Unsafe', 4: 'Deformed' };
+
+  // Look up an OpenAIP runway by end designator
+  function findOaipRunway(icao, desig) {
+    var cached = openaipCache[icao];
+    if (!cached || !cached.data || !cached.data.runways) return null;
+    var norm = desig.replace(/^0/, '');
+    for (var i = 0; i < cached.data.runways.length; i++) {
+      var d = cached.data.runways[i].designator || '';
+      if (d === desig || d.replace(/^0/, '') === norm) return cached.data.runways[i];
+    }
+    return null;
+  }
+
+  // Build aids HTML for a runway end designator (e.g. "04R") from OpenAIP data
+  function buildAidsHtml(icao, desig) {
+    var rw = findOaipRunway(icao, desig);
+    if (!rw) return '';
+    var html = '';
+    var iaa = rw.instrumentApproachAids || [];
+    for (var a = 0; a < iaa.length; a++) {
+      var aid = iaa[a];
+      var label = IAA_LABELS[aid.type] || 'NAV';
+      if (aid.identifier) label += ' ' + aid.identifier;
+      if (aid.frequency && aid.frequency.value) label += ' ' + aid.frequency.value;
+      html += '<span class="oaip-ils">' + escapeHtml(label) + '</span>';
+    }
+    var vaa = rw.visualApproachAids || [];
+    for (var v = 0; v < vaa.length; v++) {
+      html += '<span class="oaip-visual">' + escapeHtml(VAA_LABELS[vaa[v]] || 'Visual') + '</span>';
+    }
+    if (rw.pilotCtrlLighting) {
+      html += '<span class="oaip-service">PCL</span>';
+    }
+    return html;
+  }
+
+  // Build surface detail HTML from OpenAIP runway data (condition + PCN)
+  function buildSurfaceDetail(icao, desig) {
+    var rw = findOaipRunway(icao, desig);
+    if (!rw || !rw.surface) return '';
+    var html = '';
+    var cond = rw.surface.condition;
+    if (cond != null && cond !== 0) { // 0 = Good (don't show)
+      var condLabel = SURFACE_COND[cond] || 'Unknown';
+      var condClass = cond >= 2 ? 'oaip-cond-warn' : 'oaip-cond';
+      html += ' <span class="' + condClass + '">' + condLabel + '</span>';
+    }
+    return html;
+  }
+
   function isNotamStale(icao) {
     var t = notamCacheTime[icao];
     return !t || (Date.now() - t > NOTAM_CACHE_MAX_AGE);
@@ -435,29 +520,24 @@
       }
       html += '</span></div>';
     }
-    var fuel = estimateFuel(row);
-    html += '<div class="info-row"><span class="info-label">Fuel</span>';
-    html += fuel ? '<span class="info-value">' + fuel.join(', ') + '</span>' : '<span class="info-value info-unknown">No data</span>';
-    html += '</div>';
-    var hours = estimateHours(row);
-    html += '<div class="info-row"><span class="info-label">Hours</span>';
-    html += hours ? '<span class="info-value">' + hours + '</span>' : '<span class="info-value info-unknown">No data</span>';
-    html += '</div>';
-    var parking = estimateParking(row);
-    html += '<div class="info-row"><span class="info-label">Parking</span>';
-    html += parking ? '<span class="info-value">' + parking + '</span>' : '<span class="info-value info-unknown">No data</span>';
-    html += '</div>';
     html += '</div>';
     if (runways.length > 0) {
-      html += '<table class="runway-table" data-icao="' + escapeHtml(gpsCode || ident) + '"><thead><tr><th>RWY</th><th>Length</th><th>Width</th><th>Surface</th></tr></thead><tbody>';
+      html += '<table class="runway-table" data-icao="' + escapeHtml(gpsCode || ident) + '"><thead><tr><th>RWY</th><th>Length</th><th>Width</th><th>Surface</th><th class="rwy-aids-th">Aids</th></tr></thead><tbody>';
       for (var ri = 0; ri < runways.length; ri++) {
         var rwy = runways[ri];
-        html += '<tr>';
-        html += '<td>' + escapeHtml(rwy[RWY.designator]) + '</td>';
-        html += '<td>' + ftToM(rwy[RWY.length]) + '</td>';
-        html += '<td>' + ftToM(rwy[RWY.width]) + '</td>';
-        html += '<td>' + escapeHtml(rwy[RWY.surface]) + '</td>';
-        html += '</tr>';
+        var ends = parseRunwayEnds(rwy[RWY.designator]);
+        var span = ends.length || 1;
+        for (var ej = 0; ej < ends.length; ej++) {
+          html += '<tr>';
+          html += '<td>' + escapeHtml(ends[ej].name) + '</td>';
+          if (ej === 0) {
+            html += '<td rowspan="' + span + '">' + ftToM(rwy[RWY.length]) + '</td>';
+            html += '<td rowspan="' + span + '">' + ftToM(rwy[RWY.width]) + '</td>';
+            html += '<td rowspan="' + span + '">' + escapeHtml(rwy[RWY.surface]) + '</td>';
+          }
+          html += '<td class="rwy-aids-cell" data-desig="' + escapeHtml(ends[ej].name) + '"></td>';
+          html += '</tr>';
+        }
       }
       html += '</tbody></table>';
     }
@@ -580,6 +660,137 @@
     }
   }
 
+  // --- OpenAIP popup enrichment ---
+  function fetchOpenAipForPopup(popupEl, icao) {
+    var cached = openaipCache[icao];
+    if (cached && (Date.now() - cached.time < OPENAIP_CACHE_AGE)) {
+      if (cached.data) enrichInfoTab(popupEl, icao, cached.data);
+      return;
+    }
+    fetch(OWM_PROXY + '/airport?icao=' + encodeURIComponent(icao))
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        openaipCache[icao] = { data: data, time: Date.now() };
+        if (data) enrichInfoTab(popupEl, icao, data);
+      })
+      .catch(function () { /* graceful degradation */ });
+  }
+
+  function enrichInfoTab(popupEl, icao, data) {
+    var infoGrid = popupEl.querySelector('.popup-info-grid');
+    if (!infoGrid) return;
+
+    // Find last existing row as insertion anchor
+    var lastRow = null;
+    var rows = infoGrid.querySelectorAll('.info-row');
+    if (rows.length) lastRow = rows[rows.length - 1];
+
+    // Helper: append a new info row at the end of the grid
+    function addRow(label, valueHtml) {
+      var row = document.createElement('div');
+      row.className = 'info-row';
+      row.innerHTML = '<span class="info-label">' + label + '</span><span class="info-value">' + valueHtml + '</span>';
+      infoGrid.appendChild(row);
+    }
+
+    // 1. Status badges (VFR/IFR, PPR, Private)
+    var statusBadges = '';
+    var trafficType = data.trafficType || [];
+    for (var t = 0; t < trafficType.length; t++) {
+      if (trafficType[t] === 0) statusBadges += '<span class="oaip-badge oaip-vfr">VFR</span>';
+      if (trafficType[t] === 1) statusBadges += '<span class="oaip-badge oaip-ifr">IFR</span>';
+    }
+    if (data.ppr) statusBadges += '<span class="oaip-badge oaip-ppr">PPR</span>';
+    if (data.private) statusBadges += '<span class="oaip-badge oaip-private">PRIVATE</span>';
+    if (statusBadges) addRow('Status', statusBadges);
+
+    // 2. Fuel types
+    if (data.services) {
+      var fuelTypes = data.services.fuelTypes || [];
+      if (fuelTypes.length === 0) {
+        addRow('Fuel', '<span class="oaip-no-fuel">No fuel</span>');
+      } else {
+        var fuelHtml = '';
+        for (var f = 0; f < fuelTypes.length; f++) {
+          fuelHtml += '<span class="fuel-badge">' + escapeHtml(FUEL_LABELS[fuelTypes[f]] || ('Type ' + fuelTypes[f])) + '</span>';
+        }
+        addRow('Fuel', fuelHtml);
+      }
+    }
+
+    // 3. Services (handling + passenger facilities)
+    var services = [];
+    if (data.services) {
+      var handling = data.services.handlingFacilities || [];
+      for (var h = 0; h < handling.length; h++) {
+        services.push(HANDLING_LABELS[handling[h]] || ('Service ' + handling[h]));
+      }
+      var passenger = data.services.passengerFacilities || [];
+      for (var p = 0; p < passenger.length; p++) {
+        services.push(PASSENGER_LABELS[passenger[p]] || ('Facility ' + passenger[p]));
+      }
+    }
+    if (services.length > 0) {
+      var svcHtml = '';
+      for (var s = 0; s < services.length; s++) {
+        svcHtml += '<span class="oaip-service">' + escapeHtml(services[s]) + '</span>';
+      }
+      addRow('Services', svcHtml);
+    }
+
+    // 4. Skydive activity warning
+    if (data.skydiveActivity) {
+      addRow('Warning', '<span class="oaip-badge oaip-ppr">SKYDIVE ACTIVITY</span>');
+    }
+
+    // 5. Fill Aids cells in runway table
+    var aidsCells = popupEl.querySelectorAll('.rwy-aids-cell[data-desig]');
+    for (var i = 0; i < aidsCells.length; i++) {
+      var desig = aidsCells[i].getAttribute('data-desig');
+      aidsCells[i].innerHTML = buildAidsHtml(icao, desig);
+    }
+    // Case B: wind table already built (per-end rows without data-desig)
+    var windTable = popupEl.querySelector('.runway-table-wind');
+    if (windTable && !windTable.querySelector('.rwy-aids-th')) {
+      var thead = windTable.querySelector('thead tr');
+      if (thead) {
+        var th = document.createElement('th');
+        th.className = 'rwy-aids-th';
+        th.textContent = 'Aids';
+        thead.appendChild(th);
+      }
+      var bodyRows = windTable.querySelectorAll('tbody tr');
+      for (var i = 0; i < bodyRows.length; i++) {
+        var desigCell = bodyRows[i].querySelector('.rwy-wind-desig');
+        if (!desigCell) continue;
+        var endName = desigCell.childNodes[0] ? desigCell.childNodes[0].textContent.trim() : '';
+        var td = document.createElement('td');
+        td.className = 'rwy-aids-cell';
+        td.innerHTML = buildAidsHtml(icao, endName);
+        bodyRows[i].appendChild(td);
+      }
+    }
+
+    // 6. Enrich surface cells with condition & PCN from OpenAIP
+    var rwyTable = popupEl.querySelector('.runway-table[data-icao="' + icao + '"]');
+    if (rwyTable) {
+      var trs = rwyTable.querySelectorAll('tbody tr');
+      for (var i = 0; i < trs.length; i++) {
+        var aidsCell = trs[i].querySelector('.rwy-aids-cell[data-desig]');
+        if (!aidsCell) continue;
+        var endDesig = aidsCell.getAttribute('data-desig');
+        var surfDetail = buildSurfaceDetail(icao, endDesig);
+        if (surfDetail) {
+          // Surface cell uses rowspan — find closest surface td (in this row or parent via rowspan)
+          var surfTd = trs[i].querySelector('td:nth-child(4)');
+          if (surfTd && !surfTd.classList.contains('rwy-aids-cell')) {
+            surfTd.insertAdjacentHTML('beforeend', surfDetail);
+          }
+        }
+      }
+    }
+  }
+
   // --- Render a METAR into the popup placeholder ---
   function renderMetarInPopup(el, metar) {
     if (!metar) {
@@ -660,20 +871,27 @@
     // Don't re-render if already combined
     if (rwyTable.classList.contains('runway-table-wind')) return;
 
-    // Collect runway data from the existing table rows
+    // Collect runway data from the existing table rows (one end per row, rowspan for shared cols)
     var rows = rwyTable.querySelectorAll('tbody tr');
-    var runways = []; // { desig, length, width, surface, ends: [{name, hdg}] }
+    var runways = []; // { length, width, surface, ends: [{name, hdg}] }
     for (var i = 0; i < rows.length; i++) {
       var tds = rows[i].querySelectorAll('td');
-      if (tds.length < 4) continue;
       var desig = tds[0].textContent.trim();
-      runways.push({
-        desig: desig,
-        length: tds[1].textContent.trim(),
-        width: tds[2].textContent.trim(),
-        surface: tds[3].textContent.trim(),
-        ends: parseRunwayEnds(desig)
-      });
+      var m = desig.match(/^(\d{1,2})/);
+      if (!m) continue;
+      var end = { name: desig, hdg: parseInt(m[1], 10) * 10 };
+      if (tds.length >= 4) {
+        // First end of a physical runway (has length/width/surface via rowspan)
+        runways.push({
+          length: tds[1].textContent.trim(),
+          width: tds[2].textContent.trim(),
+          surface: tds[3].textContent.trim(),
+          ends: [end]
+        });
+      } else if (runways.length > 0) {
+        // Second end (rowspanned — only desig + aids cells)
+        runways[runways.length - 1].ends.push(end);
+      }
     }
     if (runways.length === 0) return;
 
@@ -704,9 +922,14 @@
     var bestName = allEnds[bestIdx].name;
     var worstName = allEnds.length > 2 ? allEnds[worstIdx].name : null;
 
+    // Check if OpenAIP aids data is available
+    var hasAids = openaipCache[icao] && openaipCache[icao].data && openaipCache[icao].data.runways;
+
     // Build combined table replacing the original
     var html = '<table class="runway-table runway-table-wind">';
-    html += '<thead><tr><th>RWY</th><th>Length</th><th>Surface</th><th>Head/Tail</th><th>Xwind</th></tr></thead><tbody>';
+    html += '<thead><tr><th>RWY</th><th>Length</th><th>Surface</th><th>Head/Tail</th><th>Xwind</th>';
+    if (hasAids) html += '<th class="rwy-aids-th">Aids</th>';
+    html += '</tr></thead><tbody>';
     for (var r = 0; r < runways.length; r++) {
       var rw = runways[r];
       var ends = rw.ends;
@@ -732,10 +955,11 @@
         html += '<td class="rwy-wind-desig">' + escapeHtml(e.name) + badge + '</td>';
         if (j === 0) {
           html += '<td rowspan="' + span + '">' + rw.length + '</td>';
-          html += '<td rowspan="' + span + '">' + rw.surface + '</td>';
+          html += '<td rowspan="' + span + '">' + rw.surface + (hasAids ? buildSurfaceDetail(icao, ends[0].name) : '') + '</td>';
         }
         html += '<td class="' + hwClass + '">' + hwLabel + ' kt</td>';
         html += '<td class="' + xwClass + '">' + xwStr + '</td>';
+        if (hasAids) html += '<td class="rwy-aids-cell">' + buildAidsHtml(icao, e.name) + '</td>';
         html += '</tr>';
       }
     }
@@ -1283,8 +1507,8 @@
           });
 
           marker.bindPopup(buildPopupContent(row), {
-            maxWidth: 620,
-            minWidth: 450,
+            maxWidth: 700,
+            minWidth: 500,
             className: 'airport-popup',
             autoPan: true,
             autoPanPadding: [40, 40]
@@ -1393,6 +1617,9 @@
 
           // Fetch METAR only (TAF lazy-loaded on tab click)
           if (icao) fetchMetarTafCombo(metarDiv, null, tafDiv, icao);
+
+          // Fetch OpenAIP data to enrich Info tab (in parallel with METAR)
+          if (icao) fetchOpenAipForPopup(el, icao);
 
           // Populate AIP link
           var aipLink = el.querySelector('.aip-link');
