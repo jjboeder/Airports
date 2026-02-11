@@ -2951,4 +2951,31 @@ html, body {
   line-height: 1;
 }
 
+/* LLF weather crosses on map */
+.llf-cross-icon {
+  background: none !important;
+  border: none !important;
+}
+.llf-map-cross {
+  display: flex;
+  gap: 3px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 4px;
+  padding: 2px 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  pointer-events: none;
+}
+.llf-map-cross-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.llf-map-cross-lbl {
+  font-size: 8px;
+  font-weight: 700;
+  color: #666;
+  line-height: 1;
+}
+
 

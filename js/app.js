@@ -752,6 +752,26 @@
                 layer.bindPopup(function () {
                   return buildLlfPopup(feature, area, tsValid);
                 }, { maxWidth: 360, minWidth: 260, className: 'sigmet-popup-wrapper' });
+
+                // Add weather cross marker at zone centroid
+                var p = feature.properties && feature.properties.parameters;
+                if (p) {
+                  var center = layer.getBounds().getCenter();
+                  var vis = p.visibility && p.visibility.general;
+                  var visL = p.visibility && p.visibility.local;
+                  var cld = p.cloudbase && p.cloudbase.general;
+                  var cldL = p.cloudbase && p.cloudbase.local;
+                  var gVisC = llfVisColor(vis ? vis.from : 9999);
+                  var gCldC = llfCldColor(cld ? cld.from : 9999);
+                  var lVisC = llfVisColor(visL ? visL.from : 9999);
+                  var lCldC = llfCldColor(cldL ? cldL.from : 9999);
+                  var crossHtml = '<div class="llf-map-cross">' +
+                    '<div class="llf-map-cross-col"><span class="llf-map-cross-lbl">G</span>' + llfCrossSvg(gVisC, gCldC) + '</div>' +
+                    '<div class="llf-map-cross-col"><span class="llf-map-cross-lbl">L</span>' + llfCrossSvg(lVisC, lCldC) + '</div>' +
+                    '</div>';
+                  var icon = L.divIcon({ html: crossHtml, className: 'llf-cross-icon', iconSize: [46, 30], iconAnchor: [23, 15] });
+                  L.marker(center, { icon: icon, interactive: false }).addTo(layerGroup);
+                }
               }
             }).addTo(layerGroup);
           })
