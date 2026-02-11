@@ -29,11 +29,8 @@
     'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: '&copy; Esri', maxZoom: 19
     }),
-    'Stadia Smooth': L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png', {
-      attribution: osmAttr + ' &copy; <a href="https://stadiamaps.com/">Stadia</a>', maxZoom: 20
-    })
   };
-  basemaps['Stadia Smooth'].addTo(map);
+  basemaps['Light'].addTo(map);
 
   // Generate a pastel color from a string (country ISO code)
   function countryColor(str) {
