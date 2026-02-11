@@ -755,6 +755,41 @@ html, body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
 }
 
+/* Unified top-right control button size */
+.map-layer-control .leaflet-control-layers-toggle,
+.wx-layer-control .leaflet-control-layers-toggle,
+.swc-control a {
+  width: 36px !important;
+  height: 36px !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  background-image: none;
+  font-size: 20px;
+  line-height: 1;
+  text-decoration: none;
+  color: #333;
+  background-color: #fff;
+}
+
+/* Globe icon for map/overlay layer control */
+.map-layer-control .leaflet-control-layers-toggle::after {
+  content: '\1F310';  /* globe 🌐 */
+}
+
+/* Sun icon (yellow) for weather layer control */
+.wx-layer-control .leaflet-control-layers-toggle::after {
+  content: '\2600';  /* sun ☀ */
+  color: #f39c12;
+}
+
+/* Separator between radio and checkbox groups */
+.wx-layer-control .leaflet-control-layers-overlays {
+  border-top: 1px solid #ddd;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
 /* DA62 panel (Range + Route tabs) */
 #da62-panel {
   position: fixed;
@@ -1840,16 +1875,8 @@ html, body {
 
 /* SWC control button */
 .swc-control a {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  font-size: 11px;
+  font-size: 11px !important;
   font-weight: 700;
-  color: #333;
-  text-decoration: none;
-  background: #fff;
 }
 
 .swc-control a:hover {
@@ -1885,6 +1912,32 @@ html, body {
 .swc-panel-title {
   font-weight: 700;
   font-size: 13px;
+}
+
+.swc-region-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.swc-region-btn {
+  background: #e8e8e8;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #555;
+}
+
+.swc-region-btn:hover {
+  background: #ddd;
+}
+
+.swc-region-btn.swc-region-active {
+  background: #2980b9;
+  color: #fff;
+  border-color: #2471a3;
 }
 
 .swc-panel-time {
@@ -2722,4 +2775,142 @@ html, body {
   font-style: italic;
   color: #999;
 }
+
+/* LLF time step bar */
+.llf-time-bar {
+  position: fixed;
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 5px 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+  font-size: 12px;
+  user-select: none;
+}
+
+.llf-time-label {
+  font-weight: 700;
+  font-size: 11px;
+  color: #555;
+  margin-right: 4px;
+}
+
+.llf-time-btn {
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  cursor: pointer;
+  color: #333;
+  transition: background 0.1s;
+}
+
+.llf-time-btn:hover {
+  background: #ddd;
+}
+
+.llf-time-btn.llf-time-active {
+  background: #2980b9;
+  color: #fff;
+  border-color: #2471a3;
+}
+
+/* LLF popup */
+.llf-popup {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.llf-area-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 3px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.llf-valid {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.llf-detail-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.llf-detail-label {
+  flex-shrink: 0;
+  width: 40px;
+  font-weight: 600;
+  color: #555;
+}
+
+.llf-detail-value {
+  color: #333;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+}
+
+.llf-overview {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #f8f9fa;
+  border-radius: 5px;
+  border: 1px solid #e9ecef;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #444;
+}
+
+.llf-wx {
+  font-size: 11px;
+  color: #e67e22;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+/* LLF title row with crosses */
+.llf-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.llf-crosses {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  align-items: flex-end;
+}
+
+.llf-cross-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.llf-cross-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #888;
+  line-height: 1;
+}
+
 

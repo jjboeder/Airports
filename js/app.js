@@ -33,7 +33,7 @@
       attribution: osmAttr + ' &copy; <a href="https://stadiamaps.com/">Stadia</a>', maxZoom: 20
     })
   };
-  basemaps['Light'].addTo(map);
+  basemaps['Stadia Smooth'].addTo(map);
 
   // Generate a pastel color from a string (country ISO code)
   function countryColor(str) {
@@ -120,7 +120,7 @@
     var layers = {};
     OWM_LAYERS.forEach(function (l) {
       var url = OWM_PROXY + '/tile/' + l.id + '/{z}/{x}/{y}.png';
-      var tileLayer = L.tileLayer(url, { opacity: 1.0, maxZoom: 18, attribution: '&copy; OpenWeatherMap' });
+      var tileLayer = L.tileLayer(url, { opacity: 1.0, maxZoom: 18, zIndex: 500, attribution: '&copy; OpenWeatherMap' });
       var group = L.layerGroup([tileLayer]);
       layers[l.label] = group;
       wxActiveLayerGroups.push(group);
@@ -357,6 +357,481 @@
 
     loadSigmets();
     setInterval(loadSigmets, 300000); // refresh every 5 minutes
+  }
+
+  // --- LLF (Low Level Forecast) overlay ---
+  var LLF_BASE = 'https://ilmailusaa.fi/llf/ws/llf/forecast';
+  var LLF_AREAS = ['fi1', 'fi2', 'fi3', 'se1', 'se2', 'se3', 'se4', 'dk5', 'dk6', 'ee4'];
+
+  function llfFlightCategory(visFrom, cldFrom) {
+    // visFrom in meters, cldFrom in feet
+    if (visFrom < 1500 || cldFrom < 500) return { cat: 'LIFR', color: '#9b59b6' };
+    if (visFrom < 5000 || cldFrom < 1000) return { cat: 'IFR', color: '#e74c3c' };
+    if (visFrom < 8000 || cldFrom < 2000) return { cat: 'MVFR', color: '#3498db' };
+    return { cat: 'VFR', color: '#27ae60' };
+  }
+
+  // LLF cross symbol colors (matches ilmailusaa.fi legend)
+  function llfVisColor(m) {
+    if (m < 1500) return '#222';
+    if (m < 3000) return '#e74c3c';
+    if (m < 5000) return '#e67e22';
+    if (m < 8000) return '#f1c40f';
+    return '#27ae60';
+  }
+  function llfCldColor(ft) {
+    if (ft < 500) return '#222';
+    if (ft < 1000) return '#e74c3c';
+    if (ft < 1500) return '#e67e22';
+    if (ft < 2000) return '#f1c40f';
+    return '#27ae60';
+  }
+  function llfCrossSvg(visColor, cldColor) {
+    return '<svg width="18" height="18" viewBox="0 0 18 18">' +
+      '<rect x="0" y="6" width="18" height="6" rx="1" fill="' + visColor + '"/>' +
+      '<rect x="6" y="0" width="6" height="18" rx="1" fill="' + cldColor + '"/>' +
+      '</svg>';
+  }
+
+  // --- Satellite + Radar overlays (ilmailusaa.fi WMS, CORS enabled) ---
+  // Shared time offset for satellite & radar (minutes relative to now, rounded to 15 min)
+  var imgTimeOffset = 0; // 0 = latest, -15 = 15 min ago, etc.
+  var imgActiveLayers = {}; // name → { wms, layerGroup }
+
+  function imgTimeIso() {
+    var now = new Date();
+    // Round down to nearest 15 min, then apply offset
+    now.setUTCMinutes(Math.floor(now.getUTCMinutes() / 15) * 15, 0, 0);
+    return new Date(now.getTime() + imgTimeOffset * 60000).toISOString().replace(/\.\d+Z$/, '.000Z');
+  }
+
+  function imgRefresh() {
+    var t = imgTimeOffset === 0 ? '' : imgTimeIso();
+    Object.keys(imgActiveLayers).forEach(function (name) {
+      var entry = imgActiveLayers[name];
+      if (t) {
+        entry.wms.setParams({ TIME: t });
+      } else {
+        // Remove TIME param to get server default (latest)
+        delete entry.wms.wmsParams.TIME;
+        entry.wms.redraw();
+      }
+    });
+    // Update label
+    var label = document.getElementById('wx-time-label');
+    if (imgTimeOffset === 0) {
+      label.textContent = 'Now';
+    } else {
+      // Show the actual rounded time we're requesting
+      var iso = imgTimeIso();
+      var d = new Date(iso);
+      var hh = d.getUTCHours(); var mm = d.getUTCMinutes();
+      label.textContent = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + 'Z';
+    }
+  }
+
+  function imgShowBar() {
+    document.getElementById('wx-time-bar').style.display = Object.keys(imgActiveLayers).length ? 'flex' : 'none';
+  }
+
+  function setupImageLayer(name, layerGroup, wmsUrl, layerName, extraOpts) {
+    var opts = {
+      layers: layerName,
+      format: 'image/png',
+      transparent: true,
+      version: '1.1.1',
+      opacity: 0.7,
+      zIndex: 500,
+      attribution: '&copy; FMI'
+    };
+    if (extraOpts) Object.keys(extraOpts).forEach(function (k) { opts[k] = extraOpts[k]; });
+    var wms = L.tileLayer.wms(wmsUrl, opts);
+
+    map.on('overlayadd', function (e) {
+      if (e.name === name) {
+        wms.addTo(layerGroup);
+        imgActiveLayers[name] = { wms: wms, layerGroup: layerGroup };
+        if (imgTimeOffset !== 0) {
+          wms.setParams({ TIME: imgTimeIso() });
+        }
+        imgShowBar();
+      }
+    });
+    map.on('overlayremove', function (e) {
+      if (e.name === name) {
+        layerGroup.clearLayers();
+        delete imgActiveLayers[name];
+        imgShowBar();
+      }
+    });
+  }
+
+  // Wire up wx-time-bar buttons for satellite/radar
+  (function () {
+    var bar = document.getElementById('wx-time-bar');
+    if (!bar) return;
+    document.getElementById('wx-time-back').addEventListener('click', function () {
+      imgTimeOffset -= 180; imgRefresh();  // -3 hours
+    });
+    document.getElementById('wx-time-back1').addEventListener('click', function () {
+      imgTimeOffset -= 15; imgRefresh();   // -15 min
+    });
+    document.getElementById('wx-time-fwd1').addEventListener('click', function () {
+      if (imgTimeOffset < 0) { imgTimeOffset += 15; imgRefresh(); }
+    });
+    document.getElementById('wx-time-fwd').addEventListener('click', function () {
+      imgTimeOffset = Math.min(0, imgTimeOffset + 180); imgRefresh();
+    });
+    document.getElementById('wx-time-now').addEventListener('click', function () {
+      imgTimeOffset = 0; imgRefresh();
+    });
+  })();
+
+  function setupLlfLayer(layerGroup) {
+    var llfTimeSteps = [];
+    var llfActiveIdx = 0;
+    var llfIceData = {};   // keyed by timeStep ISO → area → features
+    var llfZeroData = {};  // keyed by timeStep ISO → area → freezinglvl
+    var llfCtopData = {};  // keyed by timeStep ISO → area → [cloudtop values]
+    var llfWndData = {};   // keyed by timeStep ISO → area → { dataset, time }
+    var llfOverviews = {}; // keyed by area → english text
+    var timeBar = document.getElementById('llf-time-bar');
+
+    function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+    function loadLlfData() {
+      fetch(LLF_BASE + '/getValidTimes?validForecast=true')
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          var steps = data.llfo || [];
+          if (!steps.length) return;
+          llfTimeSteps = steps;
+
+          // Pick nearest time step
+          var now = Date.now();
+          llfActiveIdx = 0;
+          for (var i = 0; i < steps.length; i++) {
+            var mid = (new Date(steps[i].valid[0]).getTime() + new Date(steps[i].valid[1]).getTime()) / 2;
+            if (now >= mid) llfActiveIdx = i;
+          }
+
+          buildTimeButtons();
+          loadAllSupplementary();
+          loadTimeStep(llfActiveIdx);
+        })
+        .catch(function (err) { console.error('LLF valid times error:', err); });
+    }
+
+    function buildTimeButtons() {
+      // Clear existing buttons (keep label)
+      var btns = timeBar.querySelectorAll('.llf-time-btn');
+      btns.forEach(function (b) { b.remove(); });
+
+      llfTimeSteps.forEach(function (step, idx) {
+        var btn = document.createElement('button');
+        btn.className = 'llf-time-btn' + (idx === llfActiveIdx ? ' llf-time-active' : '');
+        btn.textContent = step.title;
+        btn.addEventListener('click', function () {
+          llfActiveIdx = idx;
+          updateActiveButton();
+          loadTimeStep(idx);
+        });
+        timeBar.appendChild(btn);
+      });
+    }
+
+    function updateActiveButton() {
+      var btns = timeBar.querySelectorAll('.llf-time-btn');
+      btns.forEach(function (b, i) {
+        b.classList.toggle('llf-time-active', i === llfActiveIdx);
+      });
+    }
+
+    function loadAllSupplementary() {
+      // Load ice + zero + overview for all areas (once, covers all time steps)
+      LLF_AREAS.forEach(function (area) {
+        fetch(LLF_BASE + '/getValidForecast/' + area + '/ice?type=llfo')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            (d.timeSteps || []).forEach(function (ts) {
+              var tsKey = ts.valid[0];
+              if (!llfIceData[tsKey]) llfIceData[tsKey] = {};
+              llfIceData[tsKey][area] = (ts.forecast && ts.forecast.features) || [];
+            });
+          }).catch(function () {});
+
+        fetch(LLF_BASE + '/getValidForecast/' + area + '/zero?type=llfo')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            (d.timeSteps || []).forEach(function (ts) {
+              var tsKey = ts.valid[0];
+              if (!llfZeroData[tsKey]) llfZeroData[tsKey] = {};
+              var feats = (ts.forecast && ts.forecast.features) || [];
+              if (feats.length && feats[0].properties && feats[0].properties.parameters) {
+                llfZeroData[tsKey][area] = feats[0].properties.parameters.freezinglvl;
+              }
+            });
+          }).catch(function () {});
+
+        fetch(LLF_BASE + '/getValidForecast/' + area + '/ctop?type=llfo')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            (d.timeSteps || []).forEach(function (ts) {
+              var tsKey = ts.valid[0];
+              if (!llfCtopData[tsKey]) llfCtopData[tsKey] = {};
+              var feats = (ts.forecast && ts.forecast.features) || [];
+              var tops = [];
+              feats.forEach(function (f) {
+                var ct = f.properties && f.properties.parameters && f.properties.parameters.cloudtop;
+                if (ct != null) tops.push(ct);
+              });
+              if (tops.length) llfCtopData[tsKey][area] = tops;
+            });
+          }).catch(function () {});
+
+        fetch(LLF_BASE + '/getValidForecast/' + area + '/wnd?type=llfo')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            (d.timeSteps || []).forEach(function (ts) {
+              var tsKey = ts.valid[0];
+              if (!llfWndData[tsKey]) llfWndData[tsKey] = {};
+              var feats = (ts.forecast && ts.forecast.features) || [];
+              if (feats.length) {
+                var f = feats[0];
+                var fm = f.properties && f.properties.forecastModels;
+                if (fm && fm.length && fm[0].wms) {
+                  llfWndData[tsKey][area] = {
+                    dataset: fm[0].wms.dataSet,
+                    time: f.properties.valid.from
+                  };
+                }
+              }
+            });
+          }).catch(function () {});
+
+        // Overview only for Finnish areas
+        if (area.indexOf('fi') === 0) {
+          fetch(LLF_BASE + '/getValidForecast/' + area + '/overview?type=llfo')
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              var steps = d.timeSteps || [];
+              // Use the latest overview text
+              if (steps.length) {
+                var feats = (steps[steps.length - 1].forecast && steps[steps.length - 1].forecast.features) || [];
+                if (feats.length && feats[0].properties && feats[0].properties.parameters && feats[0].properties.parameters.overview) {
+                  llfOverviews[area] = feats[0].properties.parameters.overview.english;
+                }
+              }
+            }).catch(function () {});
+        }
+      });
+    }
+
+    function loadTimeStep(idx) {
+      var step = llfTimeSteps[idx];
+      if (!step) return;
+      var areas = step.areas || LLF_AREAS;
+      var tsValid = step.valid;
+
+      layerGroup.clearLayers();
+
+      areas.forEach(function (area) {
+        fetch(LLF_BASE + '/getValidForecast/' + area + '/vis-cld?type=llfo')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var timeSteps = d.timeSteps || [];
+            // Find matching time step
+            var matched = null;
+            for (var i = 0; i < timeSteps.length; i++) {
+              if (timeSteps[i].valid[0] === tsValid[0]) {
+                matched = timeSteps[i];
+                break;
+              }
+            }
+            if (!matched || !matched.forecast) return;
+
+            L.geoJSON(matched.forecast, {
+              style: function (feature) {
+                var p = feature.properties && feature.properties.parameters;
+                if (!p) return { fillColor: '#999', fillOpacity: 0.15, color: '#999', weight: 1, opacity: 0.5 };
+                var vis = p.visibility && p.visibility.general;
+                var cld = p.cloudbase && p.cloudbase.general;
+                var visFrom = vis ? vis.from : 9999;
+                var cldFrom = cld ? cld.from : 9999;
+                var fc = llfFlightCategory(visFrom, cldFrom);
+                return {
+                  fillColor: fc.color,
+                  fillOpacity: 0.2,
+                  color: fc.color,
+                  weight: 2,
+                  opacity: 0.6
+                };
+              },
+              onEachFeature: function (feature, layer) {
+                layer.bindPopup(function () {
+                  return buildLlfPopup(feature, area, tsValid);
+                }, { maxWidth: 360, minWidth: 260, className: 'sigmet-popup-wrapper' });
+              }
+            }).addTo(layerGroup);
+          })
+          .catch(function (err) { console.error('LLF vis-cld error for ' + area + ':', err); });
+      });
+
+      // Add wind barb WMS layers after a short delay (let supplementary data load)
+      setTimeout(function () {
+        areas.forEach(function (area) {
+          var wnd = llfWndData[tsValid[0]] && llfWndData[tsValid[0]][area];
+          if (!wnd || !wnd.dataset) return;
+          var wmsLayer = L.tileLayer.wms('https://ilmailusaa.fi/ncwms/wms', {
+            layers: wnd.dataset + '/wind',
+            styles: 'barb/greyscale',
+            format: 'image/png',
+            transparent: true,
+            version: '1.1.1',
+            time: wnd.time,
+            elevation: '10',
+            opacity: 0.7
+          });
+          wmsLayer.addTo(layerGroup);
+        });
+      }, 1500);
+    }
+
+    function buildLlfPopup(feature, area, tsValid) {
+      var p = feature.properties && feature.properties.parameters;
+      var vis = p && p.visibility && p.visibility.general;
+      var visL = p && p.visibility && p.visibility.local;
+      var cld = p && p.cloudbase && p.cloudbase.general;
+      var cldL = p && p.cloudbase && p.cloudbase.local;
+      var pw = p && p.presentweather;
+
+      var visFrom = vis ? vis.from : 9999;
+      var cldFrom = cld ? cld.from : 9999;
+      var fc = llfFlightCategory(visFrom, cldFrom);
+
+      var from = new Date(tsValid[0]);
+      var to = new Date(tsValid[1]);
+      var timeStr = pad2(from.getUTCHours()) + '-' + pad2(to.getUTCHours()) + ' UTC';
+
+      // Cross symbols
+      var gVisC = llfVisColor(visFrom);
+      var gCldC = llfCldColor(cldFrom);
+      var lVisC = llfVisColor(visL ? visL.from : 9999);
+      var lCldC = llfCldColor(cldL ? cldL.from : 9999);
+
+      var html = '<div class="llf-popup">';
+      html += '<div class="llf-title-row">';
+      html += '<div class="llf-area-badge" style="background:' + fc.color + '">' + area.toUpperCase() + ' · ' + fc.cat + '</div>';
+      html += '<div class="llf-crosses">';
+      html += '<div class="llf-cross-col"><span class="llf-cross-label">G</span>' + llfCrossSvg(gVisC, gCldC) + '</div>';
+      html += '<div class="llf-cross-col"><span class="llf-cross-label">L</span>' + llfCrossSvg(lVisC, lCldC) + '</div>';
+      html += '</div>';
+      html += '</div>';
+      html += '<div class="llf-valid">' + timeStr + '</div>';
+
+      // Visibility
+      if (vis) {
+        html += '<div class="llf-detail-row"><span class="llf-detail-label">VIS</span><span class="llf-detail-value">';
+        html += fmtRange(vis.from, vis.to, 'm');
+        if (visL && (visL.from !== vis.from || visL.to !== vis.to)) {
+          html += ' (local ' + fmtRange(visL.from, visL.to, 'm') + ')';
+        }
+        html += '</span></div>';
+      }
+
+      // Ceiling
+      if (cld) {
+        html += '<div class="llf-detail-row"><span class="llf-detail-label">CLD</span><span class="llf-detail-value">';
+        html += fmtRange(cld.from, cld.to, 'ft');
+        if (cldL && (cldL.from !== cld.from || cldL.to !== cld.to)) {
+          html += ' (local ' + fmtRange(cldL.from, cldL.to, 'ft') + ')';
+        }
+        html += '</span></div>';
+      }
+
+      // Present weather
+      if (pw) {
+        var wxItems = [];
+        if (pw.general) wxItems.push(pw.general);
+        if (pw.local && pw.local !== pw.general) wxItems.push('local ' + pw.local);
+        if (wxItems.length) {
+          html += '<div class="llf-wx">WX: ' + wxItems.join(', ') + '</div>';
+        }
+      }
+
+      // Icing
+      var tsKey = tsValid[0];
+      var iceFeats = llfIceData[tsKey] && llfIceData[tsKey][area];
+      if (iceFeats && iceFeats.length) {
+        iceFeats.forEach(function (f) {
+          var ice = f.properties && f.properties.parameters && f.properties.parameters.ice;
+          if (ice && ice.length) {
+            ice.forEach(function (entry) {
+              var lvl = entry.lvl || {};
+              var int_ = entry.intensity || {};
+              html += '<div class="llf-detail-row"><span class="llf-detail-label">ICE</span><span class="llf-detail-value">';
+              html += (int_.from || '?');
+              if (int_.to && int_.to !== int_.from) html += '-' + int_.to;
+              html += ' FL' + pad2(lvl.from || 0) + '-FL' + pad2(lvl.to || 0);
+              html += '</span></div>';
+            });
+          }
+        });
+      }
+
+      // Freezing level
+      var zero = llfZeroData[tsKey] && llfZeroData[tsKey][area];
+      if (zero) {
+        html += '<div class="llf-detail-row"><span class="llf-detail-label">0°C</span><span class="llf-detail-value">';
+        if (zero.from === 0 && zero.to === 0) {
+          html += 'SFC';
+        } else {
+          html += fmtRange(zero.from, zero.to, 'ft');
+        }
+        html += '</span></div>';
+      }
+
+      // Cloud tops
+      var ctops = llfCtopData[tsKey] && llfCtopData[tsKey][area];
+      if (ctops && ctops.length) {
+        var maxTop = Math.max.apply(null, ctops);
+        html += '<div class="llf-detail-row"><span class="llf-detail-label">TOP</span><span class="llf-detail-value">';
+        html += 'FL' + (maxTop < 100 ? pad2(maxTop) : maxTop);
+        if (ctops.length > 1) {
+          var minTop = Math.min.apply(null, ctops);
+          if (minTop !== maxTop) html += ' (lowest FL' + (minTop < 100 ? pad2(minTop) : minTop) + ')';
+        }
+        html += '</span></div>';
+      }
+
+      // Overview
+      var overview = llfOverviews[area];
+      if (overview && overview !== 'N/A') {
+        html += '<div class="llf-overview">' + overview + '</div>';
+      }
+
+      html += '</div>';
+      return html;
+    }
+
+    function fmtRange(from, to, unit) {
+      if (from === to || to === 9999) return from + (to === 9999 ? '+' : '') + ' ' + unit;
+      return from + '-' + to + ' ' + unit;
+    }
+
+    // Show/hide time bar when layer is toggled
+    map.on('overlayadd', function (e) {
+      if (e.name === 'LLF') {
+        timeBar.style.display = 'flex';
+        loadLlfData();
+      }
+    });
+    map.on('overlayremove', function (e) {
+      if (e.name === 'LLF') {
+        timeBar.style.display = 'none';
+        layerGroup.clearLayers();
+      }
+    });
   }
 
   // --- Airspace R/D/P overlay ---
@@ -991,10 +1466,13 @@
     overlays['Obstacles'] = obsLayer;
     loadAMAGrid(amaLayer, obsLayer);
 
-    // SIGMET overlay
+    // SIGMET overlay (added to weather control below)
     var sigmetLayer = L.layerGroup();
-    overlays['SIGMETs'] = sigmetLayer;
     setupSigmetLayer(sigmetLayer);
+
+    // LLF overlay (added to weather control below)
+    var llfLayer = L.layerGroup();
+    setupLlfLayer(llfLayer);
 
     // OpenAIP airspace tile overlay
     var airspaceTileLayer = L.tileLayer(OWM_PROXY + '/airspace-tiles/{z}/{x}/{y}.png', {
@@ -1022,12 +1500,36 @@
       collapsed: true,
       position: 'topright'
     }).addTo(map);
+    // Add globe icon class to main layer control
+    window.AirportApp.layerControl.getContainer().classList.add('map-layer-control');
+
+    // Satellite overlay (ilmailusaa.fi GeoServer WMS, CORS enabled)
+    var satLayer = L.layerGroup();
+    setupImageLayer('Sat. Image', satLayer,
+      'https://www.ilmailusaa.fi/geoserver/Satellite/wms',
+      'sat_geo_eur_seviri-15min_realistic_colors_hrv_with_masked_ir108',
+      { attribution: '&copy; FMI / EUMETSAT' });
+
+    // Radar overlay (ilmailusaa.fi GeoServer WMS, CORS enabled)
+    var radarLayer = L.layerGroup();
+    setupImageLayer('Radar', radarLayer,
+      'https://www.ilmailusaa.fi/geoserver/Radar/wms',
+      'skandinavia_rr_eureffin',
+      { attribution: '&copy; FMI' });
 
     // Weather radio-button control (below main control)
-    L.control.layers(wxBasemaps, null, {
+    var wxOverlays = {
+      'Sat. Image': satLayer,
+      'Radar': radarLayer,
+      'SIGMETs': sigmetLayer,
+      'LLF': llfLayer
+    };
+    var wxControl = L.control.layers(wxBasemaps, wxOverlays, {
       collapsed: true,
       position: 'topright'
     }).addTo(map);
+    // Add weather icon class to this control
+    wxControl.getContainer().classList.add('wx-layer-control');
 
     // SWC button control
     var SwcControl = L.Control.extend({
@@ -2501,27 +3003,61 @@
 
   // --- SWC panel ---
 
-  var swcLoaded = false;
+  var swcRegion = 'finland';
+  var swcCache = {}; // { region: { html, time, pdfHref } }
 
   function toggleSwcPanel() {
     var panel = document.getElementById('swc-panel');
     if (!panel) return;
     if (panel.style.display === 'none') {
       panel.style.display = '';
-      if (!swcLoaded) loadSwc();
+      loadSwc(swcRegion);
     } else {
       panel.style.display = 'none';
     }
   }
 
-  function loadSwc() {
+  function swcNearestTime() {
+    // Return nearest 6h UTC slot: '0000', '0600', '1200', '1800'
+    var h = new Date().getUTCHours();
+    var slot = Math.round(h / 6) * 6;
+    if (slot >= 24) slot = 0;
+    return String(slot).padStart(2, '0') + '00';
+  }
+
+  function loadSwc(region) {
     var body = document.querySelector('.swc-panel-body');
     var timeEl = document.querySelector('.swc-panel-time');
     var pdfEl = document.querySelector('.swc-panel-pdf');
     if (!body) return;
 
-    body.innerHTML = '<span class="metar-loading">Loading SWC...</span>';
+    // Check cache
+    if (swcCache[region]) {
+      body.innerHTML = swcCache[region].html;
+      timeEl.textContent = swcCache[region].time || '';
+      if (swcCache[region].pdfHref) {
+        pdfEl.href = swcCache[region].pdfHref;
+        pdfEl.style.display = '';
+      } else {
+        pdfEl.style.display = 'none';
+      }
+      return;
+    }
 
+    body.innerHTML = '<span class="metar-loading">Loading SWC...</span>';
+    timeEl.textContent = '';
+    pdfEl.style.display = 'none';
+
+    if (region === 'finland') {
+      loadSwcFinland(body, timeEl, pdfEl);
+    } else if (region === 'nordic') {
+      loadSwcNordic(body, timeEl, pdfEl);
+    } else if (region === 'europe') {
+      loadSwcEurope(body, timeEl, pdfEl);
+    }
+  }
+
+  function loadSwcFinland(body, timeEl, pdfEl) {
     fetch('https://www.ilmailusaa.fi/weatheranim.php?region=scandinavia&id=swc&level=SWC&time=')
       .then(function (res) { return res.json(); })
       .then(function (data) {
@@ -2531,30 +3067,83 @@
         }
         var img = data.images[0];
         var imageUrl = 'https://www.ilmailusaa.fi/' + img.src.replace('../', '');
-
-        body.innerHTML = '<img class="swc-chart-img" src="' + imageUrl + '" alt="SWC">';
-
-        if (img.time && timeEl) {
-          timeEl.textContent = img.time;
-        }
-        if (data.pdf && pdfEl) {
-          pdfEl.href = 'https://www.ilmailusaa.fi/' + data.pdf.replace('./', '');
+        var html = '<img class="swc-chart-img" src="' + imageUrl + '" alt="SWC Finland">';
+        body.innerHTML = html;
+        var time = img.time || '';
+        if (timeEl) timeEl.textContent = time;
+        var pdfHref = null;
+        if (data.pdf) {
+          pdfHref = 'https://www.ilmailusaa.fi/' + data.pdf.replace('./', '');
+          pdfEl.href = pdfHref;
           pdfEl.style.display = '';
         }
-        swcLoaded = true;
+        swcCache.finland = { html: html, time: time, pdfHref: pdfHref };
       })
       .catch(function () {
         body.innerHTML = '<span class="info-unknown">Failed to load SWC</span>';
       });
   }
 
-  // Close button
+  function loadSwcNordic(body, timeEl, pdfEl) {
+    // MET Norway sigcharts API — has CORS, returns PNG directly
+    var url = 'https://api.met.no/weatherapi/sigcharts/2.0/?area=nordic';
+    var img = new Image();
+    img.className = 'swc-chart-img';
+    img.alt = 'SWC Nordic';
+    img.onload = function () {
+      var html = '<img class="swc-chart-img" src="' + url + '" alt="SWC Nordic">';
+      body.innerHTML = html;
+      timeEl.textContent = 'Latest';
+      swcCache.nordic = { html: html, time: 'Latest', pdfHref: null };
+    };
+    img.onerror = function () {
+      body.innerHTML = '<span class="info-unknown">Failed to load Nordic SWC</span>';
+    };
+    img.src = url;
+  }
+
+  function loadSwcEurope(body, timeEl, pdfEl) {
+    // WAFC London EUR SIGWX via worker proxy (vedur.is has no CORS)
+    var time = swcNearestTime();
+    var url = OWM_PROXY + '/swc-europe?time=' + time;
+    var img = new Image();
+    img.className = 'swc-chart-img';
+    img.alt = 'SWC Europe';
+    img.onload = function () {
+      var html = '<img class="swc-chart-img" src="' + url + '" alt="SWC Europe">';
+      body.innerHTML = html;
+      var label = 'WAFC London ' + time.slice(0, 2) + ':' + time.slice(2) + 'Z';
+      timeEl.textContent = label;
+      swcCache.europe = { html: html, time: label, pdfHref: null };
+    };
+    img.onerror = function () {
+      body.innerHTML = '<span class="info-unknown">Failed to load Europe SWC</span>';
+    };
+    img.src = url;
+  }
+
+  // Close button + region tabs
   document.addEventListener('DOMContentLoaded', function () {
     var closeBtn = document.querySelector('.swc-panel-close');
     if (closeBtn) {
       closeBtn.addEventListener('click', function () {
         var panel = document.getElementById('swc-panel');
         if (panel) panel.style.display = 'none';
+      });
+    }
+
+    // Region tab switching
+    var regionBtns = document.querySelectorAll('.swc-region-btn');
+    for (var i = 0; i < regionBtns.length; i++) {
+      regionBtns[i].addEventListener('click', function () {
+        var region = this.getAttribute('data-region');
+        if (region === swcRegion) return;
+        swcRegion = region;
+        for (var j = 0; j < regionBtns.length; j++) {
+          regionBtns[j].classList.remove('swc-region-active');
+        }
+        this.classList.add('swc-region-active');
+        loadSwc(region);
       });
     }
 

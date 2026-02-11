@@ -27,11 +27,16 @@
   <!-- Weather time control bar -->
   <div id="wx-time-bar" class="wx-time-bar" style="display:none;">
     <button id="wx-time-back" class="wx-time-btn" title="Back 3 hours">&laquo;</button>
-    <button id="wx-time-back1" class="wx-time-btn" title="Back 1 step">&lsaquo;</button>
+    <button id="wx-time-back1" class="wx-time-btn" title="Back 15 min">&lsaquo;</button>
     <span id="wx-time-label" class="wx-time-label">Now</span>
-    <button id="wx-time-fwd1" class="wx-time-btn" title="Forward 1 step">&rsaquo;</button>
+    <button id="wx-time-fwd1" class="wx-time-btn" title="Forward 15 min">&rsaquo;</button>
     <button id="wx-time-fwd" class="wx-time-btn" title="Forward 3 hours">&raquo;</button>
     <button id="wx-time-now" class="wx-time-btn wx-time-now" title="Reset to now">Now</button>
+  </div>
+
+  <!-- LLF time step bar -->
+  <div id="llf-time-bar" class="llf-time-bar" style="display:none;">
+    <span class="llf-time-label">LLF</span>
   </div>
 
   <!-- Route Weather floating panel -->
@@ -56,6 +61,11 @@
   <div id="swc-panel" class="swc-panel" style="display:none;">
     <div class="swc-panel-hdr">
       <span class="swc-panel-title">SWC</span>
+      <div class="swc-region-tabs">
+        <button class="swc-region-btn swc-region-active" data-region="finland">Finland</button>
+        <button class="swc-region-btn" data-region="nordic">Nordic</button>
+        <button class="swc-region-btn" data-region="europe">Europe</button>
+      </div>
       <span class="swc-panel-time"></span>
       <a class="swc-panel-pdf" target="_blank" rel="noopener" style="display:none">PDF</a>
       <button class="swc-panel-close">&times;</button>
@@ -70,8 +80,8 @@
     <div id="search-results"></div>
   </div>
 
-  <div id="legend-min" class="panel-mini panel-mini-left" title="Legend">&#9432;</div>
-  <div id="legend" class="panel">
+  <div id="legend-min" class="panel-mini panel-mini-left visible" title="Legend">&#9432;</div>
+  <div id="legend" class="panel minimized">
     <button class="panel-minimize" data-target="legend" data-mini="legend-min" title="Minimize">&minus;</button>
     <h3>Airport Types</h3>
     <div class="legend-item">
@@ -116,8 +126,8 @@
     </div>
   </div>
 
-  <div id="da62-min" class="panel-mini panel-mini-right" title="DA62">&#9992;</div>
-  <div id="da62-panel" class="panel">
+  <div id="da62-min" class="panel-mini panel-mini-right visible" title="DA62">&#9992;</div>
+  <div id="da62-panel" class="panel minimized">
     <div class="panel-tabs">
       <button class="panel-tab active" data-tab="tab-range">Range</button>
       <button class="panel-tab" data-tab="tab-route">Route</button>

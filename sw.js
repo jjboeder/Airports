@@ -1,4 +1,4 @@
-var CACHE_NAME = 'airports-v4';
+var CACHE_NAME = 'airports-v5';
 var ASSETS = [
   './',
   './index.html',
@@ -62,14 +62,14 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  // App assets: cache-first with network fallback
+  // App assets: network-first with cache fallback
   e.respondWith(
-    caches.match(e.request).then(function (cached) {
-      return cached || fetch(e.request).then(function (res) {
-        var clone = res.clone();
-        caches.open(CACHE_NAME).then(function (cache) { cache.put(e.request, clone); });
-        return res;
-      });
+    fetch(e.request).then(function (res) {
+      var clone = res.clone();
+      caches.open(CACHE_NAME).then(function (cache) { cache.put(e.request, clone); });
+      return res;
+    }).catch(function () {
+      return caches.match(e.request);
     })
   );
 });

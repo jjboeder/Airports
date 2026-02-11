@@ -873,6 +873,34 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
       }
     }
 
+    // Route: /swc-europe (WAFC London EUR SIGWX chart proxy)
+    if (path === '/swc-europe') {
+      const time = (url.searchParams.get('time') || '1200').replace(/\D/g, '').padStart(4, '0');
+      const upstream = `https://www.vedur.is/photos/flugkort/PGDE14_EGRR_${time}.png`;
+      const cache = caches.default;
+      const cacheKey = new Request('https://swc-europe-cache/' + time);
+      let cached = await cache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+      try {
+        const resp = await fetch(upstream);
+        if (!resp.ok) return jsonError('SWC Europe fetch failed: ' + resp.status, 502);
+        const body = await resp.arrayBuffer();
+        const cacheResp = new Response(body, {
+          headers: { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' }
+        });
+        await cache.put(cacheKey, cacheResp.clone());
+        return new Response(body, {
+          headers: { 'Content-Type': 'image/png', ...corsHeaders(request) }
+        });
+      } catch (e) {
+        return jsonError('SWC Europe error: ' + e.message, 502);
+      }
+    }
+
     // Route: /sigmet (international SIGMETs as GeoJSON)
     if (path === '/sigmet') {
       const cache = caches.default;
