@@ -43,7 +43,7 @@ export default {
       const ids = url.searchParams.get('ids') || '';
       const icaoList = ids.split(',').filter(Boolean);
       if (icaoList.length === 0 || icaoList.length > 10 || !icaoList.every(id => /^[A-Z]{4}$/.test(id))) {
-        return jsonError('ids must be 1-10 valid 4-letter ICAO codes', 400);
+        return jsonError('ids must be 1-10 valid 4-letter ICAO codes', 400, request);
       }
       const upstream = `https://aviationweather.gov/api/data/taf?ids=${icaoList.join(',')}&format=json`;
       const resp = await fetch(upstream, {
@@ -60,7 +60,7 @@ export default {
       const ids = url.searchParams.get('ids') || '';
       const icaoList = ids.split(',').filter(Boolean);
       if (icaoList.length === 0 || icaoList.length > 50 || !icaoList.every(id => /^[A-Z]{4}$/.test(id))) {
-        return jsonError('ids must be 1-50 valid 4-letter ICAO codes', 400);
+        return jsonError('ids must be 1-50 valid 4-letter ICAO codes', 400, request);
       }
       const cache = caches.default;
       const cacheKey = new Request('https://metar-cache/' + icaoList.join(','));
@@ -86,7 +86,7 @@ export default {
     if (path === '/notams') {
       const icao = url.searchParams.get('icao') || '';
       if (!/^[A-Z]{4}$/.test(icao)) {
-        return jsonError('icao must be a single 4-letter ICAO code', 400);
+        return jsonError('icao must be a single 4-letter ICAO code', 400, request);
       }
       const cache = caches.default;
       const cacheKey = new Request('https://notam-cache/' + icao);
@@ -117,14 +117,14 @@ export default {
       const raw = url.searchParams.get('points') || '';
       const nums = raw.split(',').map(Number);
       if (nums.length < 2 || nums.length % 2 !== 0 || nums.some(isNaN)) {
-        return jsonError('points must be comma-separated lat,lon pairs', 400);
+        return jsonError('points must be comma-separated lat,lon pairs', 400, request);
       }
       const points = [];
       for (let i = 0; i < nums.length; i += 2) {
         points.push({ lat: nums[i], lon: nums[i + 1] });
       }
       if (points.length > 10) {
-        return jsonError('max 10 points', 400);
+        return jsonError('max 10 points', 400, request);
       }
       const cache = caches.default;
       const results = await Promise.all(points.map(async (pt) => {
@@ -150,7 +150,7 @@ export default {
       const step = parseFloat(url.searchParams.get('step')) || 2;
       const latStep = parseFloat(url.searchParams.get('latStep')) || step;
       if (bbox.length !== 4 || bbox.some(isNaN)) {
-        return jsonError('bbox=south,west,north,east required', 400);
+        return jsonError('bbox=south,west,north,east required', 400, request);
       }
       const [south, west, north, east] = bbox;
       const points = [];
@@ -160,7 +160,7 @@ export default {
         }
       }
       if (points.length > 120) {
-        return jsonError('Too many grid points (' + points.length + '), increase step', 400);
+        return jsonError('Too many grid points (' + points.length + '), increase step', 400, request);
       }
 
       // Fetch all points in parallel (no per-point caching to save subrequests)
@@ -189,7 +189,7 @@ export default {
       const lat = url.searchParams.get('lat');
       const lon = url.searchParams.get('lon');
       if (!lat || !lon || isNaN(lat) || isNaN(lon)) {
-        return jsonError('lat and lon required', 400);
+        return jsonError('lat and lon required', 400, request);
       }
       const upstream = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric`;
       const resp = await fetch(upstream);
@@ -204,7 +204,7 @@ export default {
       const lat = url.searchParams.get('lat');
       const lon = url.searchParams.get('lon');
       if (!lat || !lon || isNaN(lat) || isNaN(lon)) {
-        return jsonError('lat and lon required', 400);
+        return jsonError('lat and lon required', 400, request);
       }
       const upstream = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric&exclude=minutely,daily,alerts`;
       const resp = await fetch(upstream, { cf: { cacheTtl: 600, cacheEverything: true } });
@@ -219,7 +219,7 @@ export default {
       const lat = url.searchParams.get('lat');
       const lon = url.searchParams.get('lon');
       if (!lat || !lon || isNaN(lat) || isNaN(lon)) {
-        return jsonError('lat and lon required', 400);
+        return jsonError('lat and lon required', 400, request);
       }
       const upstream = `https://api.openweathermap.org/data/3.0/onecall/overview?lat=${lat}&lon=${lon}&appid=${env.OWM_KEY}&units=metric`;
       const resp = await fetch(upstream, { cf: { cacheTtl: 1800, cacheEverything: true } });
@@ -246,7 +246,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('autorouter metartaf error: ' + e.message, 502);
+        return jsonError('autorouter metartaf error: ' + e.message, 502, request);
       }
     }
 
@@ -257,7 +257,7 @@ export default {
       const totaleet = url.searchParams.get('totaleet') || '';
       const altitude = url.searchParams.get('altitude') || '';
       if (!waypoints || !departuretime || !totaleet || !altitude) {
-        return jsonError('waypoints, departuretime, totaleet, altitude required', 400);
+        return jsonError('waypoints, departuretime, totaleet, altitude required', 400, request);
       }
       try {
         const token = await getArToken(env);
@@ -274,7 +274,7 @@ export default {
         headers.set('Cache-Control', 'max-age=600');
         return new Response(resp.body, { status: 200, headers });
       } catch (e) {
-        return jsonError('autorouter gramet error: ' + e.message, 502);
+        return jsonError('autorouter gramet error: ' + e.message, 502, request);
       }
     }
 
@@ -306,7 +306,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('autorouter route error: ' + e.message, 502);
+        return jsonError('autorouter route error: ' + e.message, 502, request);
       }
     }
 
@@ -328,7 +328,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('autorouter poll error: ' + e.message, 502);
+        return jsonError('autorouter poll error: ' + e.message, 502, request);
       }
     }
 
@@ -350,7 +350,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('autorouter stop error: ' + e.message, 502);
+        return jsonError('autorouter stop error: ' + e.message, 502, request);
       }
     }
 
@@ -372,7 +372,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('autorouter close error: ' + e.message, 502);
+        return jsonError('autorouter close error: ' + e.message, 502, request);
       }
     }
 
@@ -405,7 +405,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('autorouter airport-docs error: ' + e.message, 502);
+        return jsonError('autorouter airport-docs error: ' + e.message, 502, request);
       }
     }
 
@@ -426,7 +426,7 @@ export default {
         Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
         return new Response(resp.body, { status: 200, headers });
       } catch (e) {
-        return jsonError('autorouter airport-doc error: ' + e.message, 502);
+        return jsonError('autorouter airport-doc error: ' + e.message, 502, request);
       }
     }
 
@@ -448,7 +448,7 @@ export default {
         headers.set('Content-Disposition', `inline; filename="${icao}_charts.pdf"`);
         return new Response(resp.body, { status: 200, headers });
       } catch (e) {
-        return jsonError('autorouter airport-pdf error: ' + e.message, 502);
+        return jsonError('autorouter airport-pdf error: ' + e.message, 502, request);
       }
     }
 
@@ -467,7 +467,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('autorouter aircraft error: ' + e.message, 502);
+        return jsonError('autorouter aircraft error: ' + e.message, 502, request);
       }
     }
 
@@ -478,7 +478,7 @@ export default {
       try {
         const body = await request.json();
         if (!body || !body.type || !body.data) {
-          return jsonError('type and data required', 400);
+          return jsonError('type and data required', 400, request);
         }
 
         const systemPrompt = `You are an aviation weather briefing assistant for a DA62 pilot operating in Europe. Generate concise, structured pilot weather briefings from the provided data.
@@ -555,7 +555,7 @@ Alternate Airport: ${d.alternate ? d.alternate.code : 'None designated'}${d.alte
 Alternate TAF: ${d.alternate.taf || 'Not available'}
 Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alternate.notams.map(n => n.id + ': ' + n.text).join('\n') : 'None'}` : ''}`;
         } else {
-          return jsonError('type must be "airport" or "route"', 400);
+          return jsonError('type must be "airport" or "route"', 400, request);
         }
 
         const anthropicResp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -576,7 +576,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
 
         if (!anthropicResp.ok) {
           const errText = await anthropicResp.text();
-          return jsonError('Anthropic API error: ' + anthropicResp.status + ' ' + errText, 502);
+          return jsonError('Anthropic API error: ' + anthropicResp.status + ' ' + errText, 502, request);
         }
 
         // Pipe the SSE stream through to the client
@@ -588,7 +588,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
 
         return new Response(anthropicResp.body, { status: 200, headers });
       } catch (e) {
-        return jsonError('briefing error: ' + e.message, 500);
+        return jsonError('briefing error: ' + e.message, 500, request);
       }
     }
 
@@ -597,7 +597,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
       const firs = url.searchParams.get('firs') || '';
       const firList = firs.split(',').filter(Boolean);
       if (firList.length === 0 || firList.length > 5 || !firList.every(f => /^[A-Z]{4}$/.test(f))) {
-        return jsonError('firs must be 1-5 valid 4-letter FIR codes', 400);
+        return jsonError('firs must be 1-5 valid 4-letter FIR codes', 400, request);
       }
 
       const cache = caches.default;
@@ -631,7 +631,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           });
           if (!resp.ok) {
             const errText = await resp.text();
-            return jsonError('autorouter notam error: ' + resp.status + ' ' + errText, 502);
+            return jsonError('autorouter notam error: ' + resp.status + ' ' + errText, 502, request);
           }
           const data = await resp.json();
           total = data.total || 0;
@@ -654,7 +654,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('area-notams error: ' + e.message, 502);
+        return jsonError('area-notams error: ' + e.message, 502, request);
       }
     }
 
@@ -676,12 +676,12 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
       const bbox = url.searchParams.get('bbox') || '';
       const type = url.searchParams.get('type') || '1,2,3';
       if (!bbox || bbox.split(',').length !== 4) {
-        return jsonError('bbox=west,south,east,north required', 400);
+        return jsonError('bbox=west,south,east,north required', 400, request);
       }
       // Validate type codes
       const typeCodes = type.split(',').filter(Boolean);
       if (!typeCodes.every(t => /^\d+$/.test(t))) {
-        return jsonError('type must be comma-separated integers', 400);
+        return jsonError('type must be comma-separated integers', 400, request);
       }
 
       const cache = caches.default;
@@ -709,7 +709,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           });
           if (!resp.ok) {
             const errText = await resp.text();
-            return jsonError('OpenAIP API error: ' + resp.status + ' ' + errText, 502);
+            return jsonError('OpenAIP API error: ' + resp.status + ' ' + errText, 502, request);
           }
           const data = await resp.json();
           if (data.items) allItems = allItems.concat(data.items);
@@ -728,7 +728,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('airspace fetch error: ' + e.message, 502);
+        return jsonError('airspace fetch error: ' + e.message, 502, request);
       }
     }
 
@@ -736,7 +736,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
     if (path === '/navaids') {
       const bbox = url.searchParams.get('bbox') || '';
       if (!bbox || bbox.split(',').length !== 4) {
-        return jsonError('bbox=west,south,east,north required', 400);
+        return jsonError('bbox=west,south,east,north required', 400, request);
       }
 
       const cache = caches.default;
@@ -759,7 +759,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           });
           if (!resp.ok) {
             const errText = await resp.text();
-            return jsonError('OpenAIP navaids error: ' + resp.status + ' ' + errText, 502);
+            return jsonError('OpenAIP navaids error: ' + resp.status + ' ' + errText, 502, request);
           }
           const data = await resp.json();
           if (data.items) allItems = allItems.concat(data.items);
@@ -778,7 +778,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('navaids fetch error: ' + e.message, 502);
+        return jsonError('navaids fetch error: ' + e.message, 502, request);
       }
     }
 
@@ -786,7 +786,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
     if (path === '/airport') {
       const icao = (url.searchParams.get('icao') || '').toUpperCase();
       if (!/^[A-Z]{4}$/.test(icao)) {
-        return jsonError('icao must be a 4-letter ICAO code', 400);
+        return jsonError('icao must be a 4-letter ICAO code', 400, request);
       }
 
       const cache = caches.default;
@@ -805,7 +805,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
         });
         if (!resp.ok) {
           const errText = await resp.text();
-          return jsonError('OpenAIP airport error: ' + resp.status + ' ' + errText, 502);
+          return jsonError('OpenAIP airport error: ' + resp.status + ' ' + errText, 502, request);
         }
         const data = await resp.json();
         const match = (data.items || []).find(a => a.icaoCode === icao);
@@ -819,7 +819,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('OpenAIP airport error: ' + e.message, 502);
+        return jsonError('OpenAIP airport error: ' + e.message, 502, request);
       }
     }
 
@@ -827,7 +827,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
     if (path === '/reporting-points') {
       const bbox = url.searchParams.get('bbox') || '';
       if (!bbox || bbox.split(',').length !== 4) {
-        return jsonError('bbox=west,south,east,north required', 400);
+        return jsonError('bbox=west,south,east,north required', 400, request);
       }
 
       const cache = caches.default;
@@ -850,7 +850,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           });
           if (!resp.ok) {
             const errText = await resp.text();
-            return jsonError('OpenAIP reporting-points error: ' + resp.status + ' ' + errText, 502);
+            return jsonError('OpenAIP reporting-points error: ' + resp.status + ' ' + errText, 502, request);
           }
           const data = await resp.json();
           if (data.items) allItems = allItems.concat(data.items);
@@ -869,7 +869,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('reporting-points fetch error: ' + e.message, 502);
+        return jsonError('reporting-points fetch error: ' + e.message, 502, request);
       }
     }
 
@@ -887,7 +887,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
       }
       try {
         const resp = await fetch(upstream);
-        if (!resp.ok) return jsonError('SWC Europe fetch failed: ' + resp.status, 502);
+        if (!resp.ok) return jsonError('SWC Europe fetch failed: ' + resp.status, 502, request);
         const body = await resp.arrayBuffer();
         const cacheResp = new Response(body, {
           headers: { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' }
@@ -897,7 +897,7 @@ Alternate NOTAMs: ${d.alternate.notams && d.alternate.notams.length > 0 ? d.alte
           headers: { 'Content-Type': 'image/png', ...corsHeaders(request) }
         });
       } catch (e) {
-        return jsonError('SWC Europe error: ' + e.message, 502);
+        return jsonError('SWC Europe error: ' + e.message, 502, request);
       }
     }
 
@@ -994,14 +994,12 @@ function requireOrigin(request) {
   return null;
 }
 
-function jsonError(message, status) {
+function jsonError(message, status, request) {
   return new Response(JSON.stringify({ error: message }), {
     status: status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': 'https://jjboeder.github.io',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      ...corsHeaders(request)
     }
   });
 }
