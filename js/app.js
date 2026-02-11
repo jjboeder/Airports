@@ -487,26 +487,36 @@
   }
 
   function imgStopPlay() {
-    if (imgPlayTimer) { clearInterval(imgPlayTimer); imgPlayTimer = null; }
+    if (imgPlayTimer) { clearTimeout(imgPlayTimer); imgPlayTimer = null; }
+    imgPlaying = false;
     var btn = document.getElementById('wx-time-play');
     if (btn) btn.textContent = '\u25B6'; // ▶
   }
 
+  var imgPlaying = false;
+
   function imgTogglePlay() {
-    if (imgPlayTimer) {
+    if (imgPlaying) {
       imgStopPlay();
       return;
     }
+    imgPlaying = true;
     var btn = document.getElementById('wx-time-play');
     if (btn) btn.textContent = '\u275A\u275A'; // ❚❚ pause
     // Start from -3h if at Now
     if (imgTimeOffset === 0) imgTimeOffset = -180;
     imgRefreshSimple();
-    imgPlayTimer = setInterval(function () {
+    function nextFrame() {
+      if (!imgPlaying) return;
       imgTimeOffset += IMG_STEP;
       if (imgTimeOffset > 0) imgTimeOffset = -180; // loop
-      imgRefresh();
-    }, IMG_PLAY_DELAY);
+      imgRefresh(function () {
+        if (!imgPlaying) return;
+        // Wait a minimum display time after tiles load before advancing
+        imgPlayTimer = setTimeout(nextFrame, IMG_PLAY_DELAY);
+      });
+    }
+    imgPlayTimer = setTimeout(nextFrame, IMG_PLAY_DELAY);
   }
 
   function setupImageLayer(name, layerGroup, wmsUrl, layerName, extraOpts) {
