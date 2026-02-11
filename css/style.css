@@ -194,6 +194,18 @@ html, body {
   padding: 4px 8px;
 }
 
+/* METAR visual tooltip */
+.metar-tip { line-height: 1.4; }
+.metar-tip-hdr { font-weight: 700; margin-bottom: 1px; }
+.metar-tip-elev { font-size: 11px; color: #666; margin-bottom: 2px; }
+.metar-tip-row { display: flex; align-items: center; gap: 6px; }
+.metar-cat { color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; line-height: 1.4; }
+.metar-tip-cv { display: flex; gap: 10px; margin-top: 3px; font-size: 11px; }
+.metar-cv-item { display: flex; align-items: center; gap: 3px; }
+.metar-cv-lbl { font-size: 10px; color: #888; }
+.metar-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.metar-tip-wx { margin-top: 2px; font-size: 11px; color: #c0392b; font-weight: 600; }
+
 /* Airport marker - the leaflet wrapper div */
 .airport-marker {
   background: none !important;

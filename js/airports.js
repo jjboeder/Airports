@@ -210,6 +210,82 @@
     return 'IFR';
   }
 
+  // Color helpers for individual ceiling/visibility values
+  function ceilColor(ft) {
+    if (ft == null) return '#27ae60'; // no ceiling = clear
+    if (ft > 3000) return '#27ae60';
+    if (ft >= 1000) return '#3498db';
+    if (ft >= 600) return '#e67e22';
+    if (ft >= 500) return '#e74c3c';
+    return '#9b59b6';
+  }
+
+  function visColor(m) {
+    if (m == null) return '#888';
+    if (m > 8000) return '#27ae60';
+    if (m >= 5000) return '#3498db';
+    if (m >= 1500) return '#e67e22';
+    return '#9b59b6';
+  }
+
+  function fmtVis(m) {
+    if (m == null) return '?';
+    if (m >= 9999) return '10km+';
+    if (m >= 1000) {
+      var km = m / 1000;
+      return (km === Math.floor(km) ? km.toFixed(0) : km.toFixed(1)) + 'km';
+    }
+    return m + 'm';
+  }
+
+  function fmtCeil(ft) {
+    if (ft == null) return 'CLR';
+    return ft + 'ft';
+  }
+
+  // Decode METAR weather codes to plain English
+  var WX_INTENSITY = { '-': 'Light ', '+': 'Heavy ', '': '' };
+  var WX_DESC = {
+    MI: 'shallow ', BC: 'patches of ', PR: 'partial ', DR: 'drifting ',
+    BL: 'blowing ', SH: 'showers of ', TS: 'thunderstorm ', FZ: 'freezing '
+  };
+  var WX_PHENOM = {
+    DZ: 'drizzle', RA: 'rain', SN: 'snow', SG: 'snow grains',
+    PL: 'ice pellets', GR: 'hail', GS: 'small hail', UP: 'unknown precip',
+    BR: 'mist', FG: 'fog', FU: 'smoke', VA: 'volcanic ash',
+    DU: 'dust', SA: 'sand', HZ: 'haze', PY: 'spray',
+    PO: 'dust whirls', SQ: 'squall', FC: 'funnel cloud',
+    SS: 'sandstorm', DS: 'dust storm'
+  };
+
+  function decodeWx(code) {
+    if (!code) return code;
+    var m = code.match(/^([+-]?)(?:VC)?(MI|BC|PR|DR|BL|SH|TS|FZ)?((?:DZ|RA|SN|SG|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+)$/);
+    if (!m) return code;
+    var intensity = WX_INTENSITY[m[1]] || '';
+    var desc = m[2] ? (WX_DESC[m[2]] || '') : '';
+    // Extract all 2-char phenomenon codes from the group
+    var phenoms = [];
+    var rest = m[3];
+    while (rest.length >= 2) {
+      var p = rest.substring(0, 2);
+      if (WX_PHENOM[p]) phenoms.push(WX_PHENOM[p]);
+      else phenoms.push(p);
+      rest = rest.substring(2);
+    }
+    var text = intensity + desc + phenoms.join('/');
+    if (code.indexOf('VC') >= 0) text += ' in vicinity';
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  // Build base HTML tooltip (used for both plain and METAR tooltips)
+  function baseTipHtml(code, row) {
+    return '<div class="metar-tip">' +
+      '<div class="metar-tip-hdr">' + code + ' ' + (row[COL.name] || '') + '</div>' +
+      (row[COL.elevation] ? '<div class="metar-tip-elev">' + row[COL.elevation] + ' ft</div>' : '') +
+      '</div>';
+  }
+
   // --- Simple METAR parser ---
   function parseMetar(raw) {
     if (!raw || typeof raw !== 'string') return null;
@@ -823,9 +899,12 @@
     } else if (metar.clouds && metar.clouds.length === 0) {
       chips.push('Ceil CLR');
     }
-    if (metar.wx && metar.wx.length > 0) chips.push(metar.wx.join(' '));
-    if (metar.temp != null) chips.push(metar.temp + '\u00B0C');
-    if (metar.dewp != null) chips.push('Dew ' + metar.dewp + '\u00B0C');
+    if (metar.wx && metar.wx.length > 0) chips.push(metar.wx.map(decodeWx).join(', '));
+    if (metar.temp != null) {
+      var tempStr = metar.temp + '\u00B0C';
+      if (metar.dewp != null) tempStr += '/' + metar.dewp + '\u00B0C';
+      chips.push(tempStr);
+    }
     if (metar.altim != null) chips.push('QNH ' + metar.altim);
     if (chips.length > 0) {
       html += '<div class="wx-chips metar-chips">';
@@ -1423,11 +1502,7 @@
         if (m) {
           m.setIcon(createMarkerIcon(m._airportType, m._airportCode, null, zoom));
           // Restore original tooltip
-          var row = m._airportData;
-          var tip = m._airportCode + ' ' + (row[COL.name] || '');
-          if (row[COL.municipality]) tip += ' \u00b7 ' + row[COL.municipality];
-          if (row[COL.elevation]) tip += ' \u00b7 ' + row[COL.elevation] + ' ft';
-          m.setTooltipContent(tip);
+          m.setTooltipContent(baseTipHtml(m._airportCode, m._airportData));
         }
       }
       updatedIcaos = [];
@@ -1501,17 +1576,32 @@
         if (!marker) continue;
         marker.setIcon(createMarkerIcon(marker._airportType, marker._airportCode, m.fltCat, map.getZoom()));
         updatedIcaos.push(m.icao);
-        // Update tooltip with METAR summary
+        // Update tooltip with visual METAR summary
         var row = marker._airportData;
-        var tip = marker._airportCode + ' ' + (row[COL.name] || '');
-        if (row[COL.municipality]) tip += ' \u00b7 ' + row[COL.municipality];
-        tip += ' \u00b7 ' + (m.fltCat || '?');
+        var catCfg = METAR_CAT[m.fltCat] || { color: '#888', label: m.fltCat || '?' };
+        var tip = '<div class="metar-tip">' +
+          '<div class="metar-tip-hdr">' + marker._airportCode + ' ' + (row[COL.name] || '') + '</div>' +
+          '<div class="metar-tip-row">' +
+          '<span class="metar-cat" style="background:' + catCfg.color + '">' + catCfg.label + '</span>';
         if (m.wdir != null && m.wspd != null) {
-          tip += ' \u00b7 ' + (m.wdir === 'VRB' ? 'VRB' : m.wdir + '\u00b0') + '/' + m.wspd + 'kt';
+          tip += '<span>' + (m.wdir === 'VRB' ? 'VRB' : m.wdir + '\u00b0') + '/' + m.wspd + 'kt';
           if (m.wgst) tip += ' G' + m.wgst;
+          tip += '</span>';
         }
-        if (m.temp != null) tip += ' \u00b7 ' + m.temp + '\u00b0C';
-        if (isIcingRisk(m)) tip += ' \u00b7 \u2744 ICING';
+        if (m.temp != null) tip += '<span>' + m.temp + '\u00b0C</span>';
+        tip += '</div>' +
+          '<div class="metar-tip-cv">' +
+          '<span class="metar-cv-item"><span class="metar-dot" style="background:' + ceilColor(m.ceiling) + '"></span>' + fmtCeil(m.ceiling) + '</span>' +
+          '<span class="metar-cv-item"><span class="metar-dot" style="background:' + visColor(m.visib) + '"></span>' + fmtVis(m.visib) + '</span>' +
+          (row[COL.elevation] ? '<span class="metar-cv-item"><span class="metar-cv-lbl">Elev</span>' + row[COL.elevation] + 'ft</span>' : '') +
+          '</div>';
+        if ((m.wx && m.wx.length) || isIcingRisk(m)) {
+          tip += '<div class="metar-tip-wx">';
+          if (m.wx && m.wx.length) tip += m.wx.map(decodeWx).join(', ');
+          if (isIcingRisk(m)) tip += (m.wx && m.wx.length ? ' \u00b7 ' : '') + '\u2744 ICING';
+          tip += '</div>';
+        }
+        tip += '</div>';
         marker.setTooltipContent(tip);
       }
       console.log('METAR: updated ' + results.length + ' airport markers');
@@ -1600,10 +1690,7 @@
             autoPanPadding: [40, 40]
           });
 
-          var tip = code + ' ' + (row[COL.name] || '');
-          if (row[COL.municipality]) tip += ' · ' + row[COL.municipality];
-          if (row[COL.elevation]) tip += ' · ' + row[COL.elevation] + ' ft';
-          marker.bindTooltip(tip, { direction: 'top', offset: [0, -6] });
+          marker.bindTooltip(baseTipHtml(code, row), { direction: 'top', offset: [0, -6] });
 
           marker._airportData = row;
           marker._airportType = type;
