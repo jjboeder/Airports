@@ -559,7 +559,7 @@
     html += '<div class="popup-notam popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
     html += '<div class="popup-charts popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
     html += '<div class="popup-airgram popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" data-elev="' + (elevation || 0) + '" style="display:none;"></div>';
-    html += '<div class="popup-briefing popup-extra-content" data-icao="' + icaoSafe + '" data-name="' + escapeHtml(name) + '" data-elev="' + (elevation || 0) + '" style="display:none;"></div>';
+    html += '<div class="popup-briefing popup-extra-content" data-icao="' + icaoSafe + '" data-name="' + escapeHtml(name) + '" data-elev="' + (elevation || 0) + '" data-lat="' + lat + '" data-lon="' + lon + '" style="display:none;"></div>';
 
     html += '</div>';
     return html;
@@ -844,6 +844,92 @@
       var popup = el.closest('.popup-content');
       if (popup) renderRunwayWind(popup, icao);
     }
+  }
+
+  // --- Runway diagram SVG for popup ---
+  function buildRunwayDiagramSvg(runways) {
+    if (!runways || !runways.length) return '';
+    var svgW = 200, svgH = 200;
+    var cx = svgW / 2, cy = svgH / 2;
+    // Scale: longest runway ≈ 70px
+    var maxLen = 0;
+    for (var i = 0; i < runways.length; i++) {
+      if (runways[i][RWY.length] > maxLen) maxLen = runways[i][RWY.length];
+    }
+    var sc = maxLen > 0 ? 70 / maxLen : 0.005;
+
+    // Count parallels per heading
+    var hCnt = {}, hIdx = {};
+    for (var i = 0; i < runways.length; i++) {
+      var pm = (runways[i][RWY.designator] || '').split('/')[0].trim().match(/^(\d{1,2})/);
+      if (!pm) continue;
+      var hk = (parseInt(pm[1], 10) * 10) % 180;
+      hCnt[hk] = (hCnt[hk] || 0) + 1;
+    }
+
+    function r(v) { return Math.round(v * 10) / 10; }
+
+    var svg = '<svg class="rwy-diagram" viewBox="0 0 ' + svgW + ' ' + svgH + '">';
+    // North arrow
+    svg += '<text x="' + svgW / 2 + '" y="14" font-size="10" fill="#999" text-anchor="middle" font-weight="600">N</text>';
+    svg += '<line x1="' + svgW / 2 + '" y1="16" x2="' + svgW / 2 + '" y2="24" stroke="#bbb" stroke-width="1"/>';
+
+    for (var i = 0; i < runways.length; i++) {
+      var rwy = runways[i];
+      var desig = rwy[RWY.designator] || '';
+      var lenFt = rwy[RWY.length] || 0;
+      var widFt = rwy[RWY.width] || 60;
+      var parts = desig.split('/');
+      var m0 = parts[0] ? parts[0].trim().match(/^(\d{1,2})/) : null;
+      if (!m0) continue;
+      var hdgDeg = parseInt(m0[1], 10) * 10;
+      var hdgRad = hdgDeg * Math.PI / 180;
+      var halfLen = lenFt * sc / 2;
+      var rwyW = Math.max(widFt * sc, 3);
+
+      // Parallel offset
+      var hk = hdgDeg % 180;
+      var nP = hCnt[hk] || 1;
+      if (!hIdx[hk]) hIdx[hk] = 0;
+      var pI = hIdx[hk]++;
+      var latOff = 0;
+      if (nP > 1) {
+        latOff = (pI - (nP - 1) / 2) * halfLen * 0.4;
+      }
+
+      var dx = Math.sin(hdgRad), dy = -Math.cos(hdgRad);
+      var perpDx = dy, perpDy = -dx;
+      var ocx = cx + perpDx * latOff, ocy = cy - perpDy * latOff;
+      var x1 = ocx - dx * halfLen, y1 = ocy - dy * halfLen;
+      var x2 = ocx + dx * halfLen, y2 = ocy + dy * halfLen;
+
+      // Runway strip
+      svg += '<line x1="' + r(x1) + '" y1="' + r(y1) + '" x2="' + r(x2) + '" y2="' + r(y2)
+        + '" stroke="#fff" stroke-width="' + r(rwyW + 2) + '" stroke-linecap="butt"/>';
+      svg += '<line x1="' + r(x1) + '" y1="' + r(y1) + '" x2="' + r(x2) + '" y2="' + r(y2)
+        + '" stroke="#555" stroke-width="' + r(rwyW) + '" stroke-linecap="butt"/>';
+      svg += '<line x1="' + r(x1) + '" y1="' + r(y1) + '" x2="' + r(x2) + '" y2="' + r(y2)
+        + '" stroke="#ccc" stroke-width="0.5" stroke-dasharray="3,3"/>';
+
+      // Designators at each end
+      for (var ep = 0; ep < parts.length; ep++) {
+        var endName = parts[ep].trim();
+        var ex = ep === 0 ? x1 : x2;
+        var ey = ep === 0 ? y1 : y2;
+        var outDir = ep === 0 ? -1 : 1;
+        var tx = ex + outDir * dx * 12;
+        var ty = ey + outDir * dy * 12;
+        var textAngle = hdgDeg;
+        if (ep === 1) textAngle = (hdgDeg + 180) % 360;
+        if (textAngle > 90 && textAngle < 270) textAngle = (textAngle + 180) % 360;
+        svg += '<text x="' + r(tx) + '" y="' + r(ty)
+          + '" font-size="9" fill="#333" stroke="#fff" stroke-width="2" paint-order="stroke" font-weight="700" text-anchor="middle" dominant-baseline="central"'
+          + ' transform="rotate(' + r(textAngle) + ' ' + r(tx) + ' ' + r(ty) + ')">'
+          + escapeHtml(endName) + '</text>';
+      }
+    }
+    svg += '</svg>';
+    return '<div class="rwy-diagram-wrap">' + svg + '</div>';
   }
 
   // --- Runway wind components from METAR ---
@@ -1734,10 +1820,19 @@
                           bNotams.push({ id: nn.id, text: nn.text });
                         }
                       }
-                      window.AirportApp.streamBriefing(bDiv, {
-                        type: 'airport',
-                        data: { icao: bIcao, name: bName, elevation: bElev, metar: bMetar, taf: bTaf, notams: bNotams }
-                      });
+                      var bData = { icao: bIcao, name: bName, elevation: bElev, metar: bMetar, taf: bTaf, notams: bNotams };
+                      var app = window.AirportApp;
+                      var bLat = parseFloat(bDiv.getAttribute('data-lat'));
+                      var bLon = parseFloat(bDiv.getAttribute('data-lon'));
+                      var llfArea = app.llfAreaForCoord && app.llfAreaForCoord(bLat, bLon);
+                      if (llfArea && app.fetchLlfForBriefing) {
+                        app.fetchLlfForBriefing([llfArea]).then(function (llf) {
+                          if (llf) bData.llf = llf;
+                          app.streamBriefing(bDiv, { type: 'airport', data: bData });
+                        });
+                      } else {
+                        app.streamBriefing(bDiv, { type: 'airport', data: bData });
+                      }
                     }
 
                     var hasTaf = rawTafCache[bIcao] || tafCache[bIcao];
@@ -1823,6 +1918,7 @@
           if (source && source.getLatLng && window.AirportApp.setRangeOrigin && !window.AirportApp.routeMode) {
             window.AirportApp.setRangeOrigin(source.getLatLng());
           }
+
         });
 
         app.typeLayers = typeLayers;

@@ -682,13 +682,20 @@ html, body {
   border-bottom: 1px solid #e0e0e0;
 }
 
+.rwy-diagram-wrap {
+  text-align: center; margin: 6px 0 2px;
+}
+.rwy-diagram {
+  width: 180px; height: 180px;
+  background: #f5f7fa; border: 1px solid #e0e0e0; border-radius: 4px;
+}
+
 .rwy-wind-desig {
   font-weight: 700;
   color: #333;
 }
 
 .rwy-active {
-  background: #e8f5e9;
 }
 
 .rwy-active .rwy-wind-desig {
@@ -696,7 +703,6 @@ html, body {
 }
 
 .rwy-worst {
-  background: #fde8e8;
 }
 
 .rwy-worst .rwy-wind-desig {
@@ -1336,6 +1342,18 @@ html, body {
 .route-totals-sub { color: #888; font-weight: 400; font-size: 11px; }
 .route-totals-alt { color: #e67e22; font-weight: 600; }
 
+.route-rwy-label span {
+  font-size: 12px; font-weight: 700; color: #222;
+  text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff,
+    0 -1px 0 #fff, 0 1px 0 #fff, -1px 0 0 #fff, 1px 0 0 #fff;
+  white-space: nowrap; display: block; text-align: center;
+}
+.route-rwy-elev span {
+  font-size: 9px; font-weight: 600; color: #666;
+  text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+  white-space: nowrap; display: block; text-align: center;
+}
+
 /* Weight & Balance */
 .wb-row {
   display: flex;
@@ -1851,6 +1869,18 @@ html, body {
   background: #ddd;
 }
 
+.wx-time-play {
+  font-size: 12px;
+  padding: 4px 8px;
+  margin-left: 4px;
+  background: #27ae60;
+  color: #fff;
+  border-color: #1e8449;
+}
+.wx-time-play:hover {
+  background: #1e8449;
+}
+
 .wx-time-now {
   font-size: 11px;
   font-weight: 600;
@@ -1882,6 +1912,14 @@ html, body {
 .swc-control a:hover {
   background: #f0f0f0;
 }
+
+/* Locate control */
+.locate-control a {
+  font-size: 18px !important; line-height: 30px !important;
+  text-align: center; color: #555;
+}
+.locate-control a:hover { background: #f0f0f0; }
+.locate-active a { color: #4285f4; }
 
 /* SWC floating panel */
 .swc-panel {

@@ -849,6 +849,107 @@
         })(wp, i);
       }
     }
+
+    // Runway diagrams at departure and arrival when zoomed in
+    if (map.getZoom() >= 9 && waypoints.length >= 2) {
+      var rwyApts = [0]; // departure
+      var arrI = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
+      if (arrI > 0 && rwyApts.indexOf(arrI) === -1) rwyApts.push(arrI);
+      for (var ra = 0; ra < rwyApts.length; ra++) {
+        var rwp = waypoints[rwyApts[ra]];
+        if (!rwp || !rwp.data || !rwp.data[10] || !rwp.data[10].length) continue;
+        var rwys = rwp.data[10];
+        var elevFt = rwp.data[5] || '';
+        var aptLatLng = rwp.latlng;
+        var cosAptLat = Math.cos(aptLatLng.lat * Math.PI / 180);
+        var rwyWeight = Math.max((map.getZoom() - 4) * 2, 4);
+
+        // Count parallel runways per heading for lateral offset
+        var hdgCount = {};
+        for (var rr = 0; rr < rwys.length; rr++) {
+          var m_ = (rwys[rr][0] || '').split('/')[0].trim().match(/^(\d{1,2})/);
+          if (!m_) continue;
+          var h_ = parseInt(m_[1], 10) * 10;
+          var hk = h_ % 180; // normalize so 04 and 22 are same group
+          hdgCount[hk] = (hdgCount[hk] || 0) + 1;
+        }
+        var hdgIdx = {};
+
+        for (var rr = 0; rr < rwys.length; rr++) {
+          var rwy = rwys[rr];
+          var desig = rwy[0] || '';
+          var lenFt = rwy[1] || 0;
+          var parts = desig.split('/');
+          var m0 = parts[0] ? parts[0].trim().match(/^(\d{1,2})/) : null;
+          if (!m0) continue;
+          var hdgDeg = parseInt(m0[1], 10) * 10;
+          var hdgRad = hdgDeg * Math.PI / 180;
+          var lenM = lenFt * 0.3048 * 4; // 4x scale for visibility
+          var halfLenDeg = (lenM / 111320) / 2;
+
+          // Lateral offset for parallel runways
+          var hk = hdgDeg % 180;
+          var nParallel = hdgCount[hk] || 1;
+          if (!hdgIdx[hk]) hdgIdx[hk] = 0;
+          var parallelIdx = hdgIdx[hk]++;
+          var lateralOffDeg = 0;
+          if (nParallel > 1) {
+            var spacing = halfLenDeg * 0.35; // spacing between parallels
+            lateralOffDeg = (parallelIdx - (nParallel - 1) / 2) * spacing;
+          }
+          // Perpendicular direction (90° to runway heading)
+          var perpLat = -Math.sin(hdgRad) * lateralOffDeg;
+          var perpLon = Math.cos(hdgRad) * lateralOffDeg / cosAptLat;
+
+          // Runway center with lateral offset
+          var cLat = aptLatLng.lat + perpLat;
+          var cLon = aptLatLng.lng + perpLon;
+          var dLat = halfLenDeg * Math.cos(hdgRad);
+          var dLon = halfLenDeg * Math.sin(hdgRad) / cosAptLat;
+          var end1 = L.latLng(cLat - dLat, cLon - dLon);
+          var end2 = L.latLng(cLat + dLat, cLon + dLon);
+
+          L.polyline([end1, end2], {
+            color: '#fff', weight: rwyWeight + 3, opacity: 0.9,
+            interactive: false, lineCap: 'butt'
+          }).addTo(routeLayerGroup);
+          L.polyline([end1, end2], {
+            color: '#555', weight: rwyWeight, opacity: 0.9,
+            interactive: false, lineCap: 'butt'
+          }).addTo(routeLayerGroup);
+          L.polyline([end1, end2], {
+            color: '#ccc', weight: 1, opacity: 0.7,
+            dashArray: '4,4', interactive: false
+          }).addTo(routeLayerGroup);
+
+          // Runway designator labels at each end
+          for (var ep = 0; ep < parts.length; ep++) {
+            var endName = parts[ep].trim();
+            var endLL = ep === 0 ? end1 : end2;
+            var outDir = ep === 0 ? -1 : 1;
+            var lblLat = endLL.lat + outDir * halfLenDeg * 0.25 * Math.cos(hdgRad);
+            var lblLon = endLL.lng + outDir * halfLenDeg * 0.25 * Math.sin(hdgRad) / cosAptLat;
+            var lblIcon = L.divIcon({
+              className: 'route-rwy-label',
+              html: '<span>' + endName + '</span>',
+              iconSize: [40, 18], iconAnchor: [20, 9]
+            });
+            L.marker(L.latLng(lblLat, lblLon), { icon: lblIcon, interactive: false })
+              .addTo(routeLayerGroup);
+          }
+        }
+        // Elevation label at airport position
+        if (elevFt) {
+          var elevIcon = L.divIcon({
+            className: 'route-rwy-elev',
+            html: '<span>' + Math.round(elevFt) + ' ft</span>',
+            iconSize: [50, 14], iconAnchor: [25, -4]
+          });
+          L.marker(aptLatLng, { icon: elevIcon, interactive: false })
+            .addTo(routeLayerGroup);
+        }
+      }
+    }
   }
 
   // --- Panel rendering ---
@@ -2057,21 +2158,35 @@
       }
     }
 
-    app.streamBriefing(el, {
-      type: 'route',
-      data: {
-        waypoints: wpData,
-        legs: legData,
-        flightLevel: fl,
-        departureTime: depTime,
-        departure: { metar: depMetar, taf: depTaf, notams: depNotams },
-        enroute: enroute,
-        destination: { taf: destTaf, notams: destNotams },
-        alternate: altData,
-        airgramSummary: airgramSummary,
-        flCompare: flCompare
+    var routeData = {
+      waypoints: wpData,
+      legs: legData,
+      flightLevel: fl,
+      departureTime: depTime,
+      departure: { metar: depMetar, taf: depTaf, notams: depNotams },
+      enroute: enroute,
+      destination: { taf: destTaf, notams: destNotams },
+      alternate: altData,
+      airgramSummary: airgramSummary,
+      flCompare: flCompare
+    };
+
+    // Collect LLF areas along the route
+    var llfAreas = [];
+    if (app.llfAreaForCoord) {
+      for (var i = 0; i < waypoints.length; i++) {
+        var a = app.llfAreaForCoord(waypoints[i].latlng.lat, waypoints[i].latlng.lng);
+        if (a && llfAreas.indexOf(a) === -1) llfAreas.push(a);
       }
-    });
+    }
+    if (llfAreas.length && app.fetchLlfForBriefing) {
+      app.fetchLlfForBriefing(llfAreas).then(function (llf) {
+        if (llf) routeData.llf = llf;
+        app.streamBriefing(el, { type: 'route', data: routeData });
+      });
+    } else {
+      app.streamBriefing(el, { type: 'route', data: routeData });
+    }
   }
 
   function loadRouteGramet() {
@@ -2609,7 +2724,7 @@
     }
 
     // Weather section — METAR raw text for airports
-    var wxHtml = '<div class="section"><h2>WEATHER</h2>';
+    var wxHtml = '<div class="section wx-section"><h2>WEATHER</h2>';
     var wxCount = 0;
     for (var i = 0; i < waypoints.length; i++) {
       var wp = waypoints[i];
@@ -2646,7 +2761,7 @@
     wxHtml += '</div>';
 
     // NOTAMs section — full text
-    var notamHtml = '<div class="section"><h2>NOTAMs</h2>';
+    var notamHtml = '<div class="section notam-section"><h2>NOTAMs</h2>';
     var notamCount = 0;
     for (var i = 0; i < waypoints.length; i++) {
       var wp = waypoints[i];
@@ -2674,8 +2789,8 @@
     // We need to fetch: GRAMET (as data URL), SWC, FL Compare (from cached wind data)
     // Use a pending counter to open the print window when all are ready.
 
-    var asyncData = { grametDataUrl: null, airgramDataUrl: null, flCompHtml: '', swcUrl: null };
-    var pending = 4; // GRAMET, SWC, FL Compare, Airgram
+    var asyncData = { grametDataUrl: null, airgramDataUrl: null, flCompHtml: '', swcUrl: null, llfHtml: '', airspaceItems: null };
+    var pending = 6; // GRAMET, SWC, FL Compare, Airgram, LLF, Airspaces
 
     function onAsyncDone() {
       if (--pending > 0) return;
@@ -2684,7 +2799,7 @@
 
     function openPrintWindow() {
       // --- Route map SVG ---
-      var routeMapHtml = buildRouteMapSvg();
+      var routeMapHtml = buildRouteMapSvg(asyncData.airspaceItems);
 
       var airgramHtml = '';
       if (asyncData.airgramDataUrl) {
@@ -2708,6 +2823,8 @@
           + '<img src="' + esc(asyncData.swcUrl) + '" alt="SWC" onerror="this.style.display=\'none\'">'
           + '</div>';
       }
+
+      var llfHtml = asyncData.llfHtml;
 
       var html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
         + '<title>Flight Plan ' + esc(depCode) + ' — ' + esc(destCode) + '</title>'
@@ -2737,6 +2854,7 @@
         + '</div>'
         + wbHtml
         + wxHtml
+        + llfHtml
         + notamHtml
         + airgramHtml
         + grametHtml
@@ -2749,7 +2867,11 @@
       if (!win) return;
       win.document.write(html);
       win.document.close();
-      win.onload = function () { win.print(); };
+      // Wait for images to load; SVG <image> tiles need extra time
+      win.onload = function () {
+        var delay = win.document.querySelectorAll('image').length > 0 ? 1500 : 200;
+        setTimeout(function () { win.print(); }, delay);
+      };
     }
 
     // --- Airgram: render into offscreen element and capture canvas ---
@@ -2839,6 +2961,116 @@
         .catch(function () {})
         .finally(onAsyncDone);
     }
+
+    // --- LLF: fetch low-level forecast for route areas ---
+    var llfAreas = [];
+    if (app.llfAreaForCoord) {
+      for (var i = 0; i < waypoints.length; i++) {
+        var a = app.llfAreaForCoord(waypoints[i].latlng.lat, waypoints[i].latlng.lng);
+        if (a && llfAreas.indexOf(a) === -1) llfAreas.push(a);
+      }
+    }
+    if (llfAreas.length && app.fetchLlfForBriefing) {
+      app.fetchLlfForBriefing(llfAreas).then(function (llf) {
+        if (llf && llf.areas) {
+          var h = '<div class="section llf-section"><h2>LOW LEVEL FORECAST (LLF)</h2>';
+          h += '<p class="llf-valid">Valid: ' + esc(llf.title || '') + '</p>';
+          var areaKeys = Object.keys(llf.areas);
+          for (var i = 0; i < areaKeys.length; i++) {
+            var aKey = areaKeys[i];
+            var ad = llf.areas[aKey];
+            h += '<div class="llf-area-block">';
+            h += '<strong>' + esc(aKey.toUpperCase()) + '</strong>';
+            var details = [];
+            if (ad.visibility_m != null && ad.visibility_m < 9999) details.push('VIS ' + ad.visibility_m + ' m');
+            if (ad.ceiling_ft != null && ad.ceiling_ft < 9999) details.push('CLD ' + ad.ceiling_ft + ' ft');
+            if (ad.weather && ad.weather.length) details.push('WX: ' + ad.weather.join(', '));
+            if (ad.freezingLevel) {
+              var zr = ad.freezingLevel;
+              if (zr.from === 0 && zr.to === 0) details.push('0\u00b0C: SFC');
+              else details.push('0\u00b0C: ' + (zr.from || 0) + '-' + (zr.to || 0) + ' ft');
+            }
+            if (ad.icing && ad.icing.length) {
+              for (var j = 0; j < ad.icing.length; j++) {
+                details.push('ICE: ' + ad.icing[j].intensity + ' ' + ad.icing[j].altitude);
+              }
+            }
+            if (details.length) h += ' — ' + details.join(' | ');
+            if (ad.overview) h += '<div class="llf-overview">' + esc(ad.overview) + '</div>';
+            h += '</div>';
+          }
+          h += '</div>';
+          asyncData.llfHtml = h;
+        }
+      }).catch(function () {}).finally(onAsyncDone);
+    } else {
+      onAsyncDone();
+    }
+
+    // --- Airspaces: fetch R/D/P areas + NOTAMs along the route ---
+    var routeBbox = [];
+    for (var i = 0; i < waypoints.length; i++) {
+      routeBbox.push(waypoints[i].latlng);
+    }
+    if (routeBbox.length >= 2) {
+      var bounds = L.latLngBounds(routeBbox);
+      var padDeg = 0.2;
+      var bbox = [
+        (bounds.getWest() - padDeg).toFixed(4),
+        (bounds.getSouth() - padDeg).toFixed(4),
+        (bounds.getEast() + padDeg).toFixed(4),
+        (bounds.getNorth() + padDeg).toFixed(4)
+      ].join(',');
+      var classifyActivation = app.classifyAirspaceActivation || function () { return 'potential'; };
+      var extractDesig = app.extractActiveDesignators || function () { return {}; };
+      var findNotam = app.findNotamForAirspace || function () { return null; };
+      var countryFirs = app.COUNTRY_FIRS || {};
+      fetch(OWM_PROXY + '/airspaces?bbox=' + bbox + '&type=1,2,3')
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (!data || !data.items) return;
+          // Collect countries to fetch NOTAMs
+          var countries = {};
+          data.items.forEach(function (item) {
+            if (item.country) countries[item.country] = true;
+          });
+          var firs = [];
+          Object.keys(countries).forEach(function (cc) {
+            (countryFirs[cc] || []).forEach(function (f) {
+              if (firs.indexOf(f) === -1) firs.push(f);
+            });
+          });
+          // Fetch NOTAMs for all FIRs, then classify
+          var notamPromise = firs.length
+            ? fetch(OWM_PROXY + '/ar/area-notams?firs=' + firs.join(','))
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; })
+            : Promise.resolve(null);
+          return notamPromise.then(function (notamData) {
+            var activeDesignators = {};
+            if (notamData && notamData.rows) {
+              activeDesignators = extractDesig(notamData.rows);
+            }
+            var items = [];
+            for (var i = 0; i < data.items.length; i++) {
+              var item = data.items[i];
+              if (!item.geometry) continue;
+              var act = classifyActivation(item);
+              if (!act) continue;
+              // Upgrade with NOTAM data
+              if (findNotam(item, activeDesignators)) act = 'active';
+              if (act !== 'active') continue;
+              item._activation = act;
+              items.push(item);
+            }
+            asyncData.airspaceItems = items;
+          });
+        })
+        .catch(function () {})
+        .finally(onAsyncDone);
+    } else {
+      onAsyncDone();
+    }
   }
 
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
@@ -2911,7 +3143,8 @@
     return outline + '<path d="' + path + '" fill="#334"/>';
   }
 
-  function buildRouteMapSvg() {
+  function buildRouteMapSvg(printAirspaceItems) {
+    var app = window.AirportApp || {};
     if (waypoints.length < 2) return '';
 
     // Collect lat/lon bounds
@@ -2954,25 +3187,227 @@
     function px(lon) { return offX + (lon - minLon) * cosLat * scale; }
     function py(lat) { return offY + (maxLat - lat) * scale; }
 
-    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + svgW + ' ' + svgH + '">';
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ' + svgW + ' ' + svgH + '">';
 
-    // Background
-    svg += '<rect width="' + svgW + '" height="' + svgH + '" fill="#f8fafe" stroke="#ccc" stroke-width="0.5" rx="3"/>';
+    // Background fallback
+    svg += '<rect width="' + svgW + '" height="' + svgH + '" fill="#f0f4f8" rx="3"/>';
 
-    // Lat/lon grid lines
+    // Basemap tiles
+    var basemapInfo = app.activeBasemap;
+    if (basemapInfo && basemapInfo.url) {
+      var tileUrl = basemapInfo.url;
+      var subdomains = basemapInfo.subdomains;
+      var subArr = typeof subdomains === 'string' ? subdomains.split('') : (subdomains || ['a', 'b', 'c']);
+
+      // Choose zoom level: aim for ~4 tiles across
+      var zRaw = Math.log2(4 * 360 / lonRange);
+      var z = Math.max(4, Math.min(Math.round(zRaw), 12));
+      var n = Math.pow(2, z);
+
+      function lon2tile(lon) { return Math.floor((lon + 180) / 360 * n); }
+      function lat2tile(lat) {
+        var rad = lat * Math.PI / 180;
+        return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n);
+      }
+      function tile2lon(tx) { return tx / n * 360 - 180; }
+      function tile2lat(ty) { return Math.atan(Math.sinh(Math.PI * (1 - 2 * ty / n))) * 180 / Math.PI; }
+
+      var tileXmin = lon2tile(minLon);
+      var tileXmax = lon2tile(maxLon);
+      var tileYmin = lat2tile(maxLat); // tile Y increases southward
+      var tileYmax = lat2tile(minLat);
+
+      svg += '<defs><clipPath id="mapClip"><rect width="' + svgW + '" height="' + svgH + '" rx="3"/></clipPath></defs>';
+      svg += '<g clip-path="url(#mapClip)">';
+      var subIdx = 0;
+      for (var ty = tileYmin; ty <= tileYmax; ty++) {
+        for (var tx = tileXmin; tx <= tileXmax; tx++) {
+          var tileLonW = tile2lon(tx);
+          var tileLonE = tile2lon(tx + 1);
+          var tileLatN = tile2lat(ty);
+          var tileLatS = tile2lat(ty + 1);
+          var imgX = px(tileLonW);
+          var imgY = py(tileLatN);
+          var imgW = px(tileLonE) - imgX;
+          var imgH = py(tileLatS) - imgY;
+          var sub = subArr[subIdx % subArr.length];
+          subIdx++;
+          var url = tileUrl.replace('{s}', sub).replace('{z}', z).replace('{x}', tx).replace('{y}', ty).replace('{r}', '');
+          svg += '<image href="' + url + '" x="' + r(imgX) + '" y="' + r(imgY)
+            + '" width="' + r(imgW) + '" height="' + r(imgH) + '" preserveAspectRatio="none"/>';
+        }
+      }
+      svg += '</g>';
+    } else {
+      // Fallback: country borders from europe.geojson
+      var geoJson = app.europeGeoJson;
+      if (geoJson && geoJson.features) {
+        svg += '<g opacity="0.6">';
+        for (var fi = 0; fi < geoJson.features.length; fi++) {
+          var geom = geoJson.features[fi].geometry;
+          if (!geom) continue;
+          var polys = geom.type === 'MultiPolygon' ? geom.coordinates : (geom.type === 'Polygon' ? [geom.coordinates] : []);
+          for (var pi = 0; pi < polys.length; pi++) {
+            var path = '';
+            for (var ri = 0; ri < polys[pi].length; ri++) {
+              var ring = polys[pi][ri];
+              for (var ci = 0; ci < ring.length; ci++) {
+                var cx_ = px(ring[ci][0]), cy_ = py(ring[ci][1]);
+                path += (ci === 0 ? 'M' : 'L') + r(cx_) + ',' + r(cy_);
+              }
+              path += 'Z';
+            }
+            if (path) svg += '<path d="' + path + '" fill="#e8ecf0" stroke="#bcc4ce" stroke-width="0.5" stroke-linejoin="round"/>';
+          }
+        }
+        svg += '</g>';
+      }
+    }
+
+    // R/D/P airspace areas
+    var airspaceItems = printAirspaceItems || app.airspaceItems;
+    var AIRSPACE_TYPES = app.AIRSPACE_TYPES || {};
+    var fmtLimit = app.formatAirspaceLimit || function () { return ''; };
+    var asCallouts = []; // collect callout info for placement after polygons
+    if (airspaceItems && airspaceItems.length) {
+      svg += '<g>';
+      for (var ai = 0; ai < airspaceItems.length; ai++) {
+        var as = airspaceItems[ai];
+        if (!as.geometry) continue;
+        var typeInfo = AIRSPACE_TYPES[as.type] || { color: '#888', shortLabel: '?' };
+        var isActive = as._activation === 'active';
+        var asPolys = as.geometry.type === 'MultiPolygon' ? as.geometry.coordinates
+          : (as.geometry.type === 'Polygon' ? [as.geometry.coordinates] : []);
+        var asPath = '';
+        var centX = 0, centY = 0, centN = 0;
+        for (var api = 0; api < asPolys.length; api++) {
+          for (var ari = 0; ari < asPolys[api].length; ari++) {
+            var aRing = asPolys[api][ari];
+            for (var aci = 0; aci < aRing.length; aci++) {
+              var ax_ = px(aRing[aci][0]), ay_ = py(aRing[aci][1]);
+              asPath += (aci === 0 ? 'M' : 'L') + r(ax_) + ',' + r(ay_);
+              if (ari === 0) { centX += ax_; centY += ay_; centN++; }
+            }
+            asPath += 'Z';
+          }
+        }
+        if (!asPath) continue;
+        var asOpacity = isActive ? '0.25' : '0.08';
+        var asStroke = isActive ? '1.5' : '0.8';
+        var asDash = isActive ? '' : ' stroke-dasharray="3,3"';
+        svg += '<path d="' + asPath + '" fill="' + typeInfo.color + '" fill-opacity="' + asOpacity
+          + '" stroke="' + typeInfo.color + '" stroke-width="' + asStroke + '"' + asDash + ' stroke-linejoin="round"/>';
+        // Collect callout data for later placement
+        if (centN > 0) {
+          centX /= centN; centY /= centN;
+          var asLabel = (as.name || '').replace(/\s+/g, ' ');
+          var altLabel = '';
+          if (as.lowerLimit) altLabel += fmtLimit(as.lowerLimit);
+          if (as.upperLimit) altLabel += (altLabel ? '-' : '') + fmtLimit(as.upperLimit);
+          asCallouts.push({ cx: centX, cy: centY, name: asLabel, alt: altLabel, color: typeInfo.color, shortLabel: typeInfo.shortLabel || '?' });
+        }
+      }
+      svg += '</g>';
+    }
+
+    // R/D/P callout boxes — placed outside areas with leader lines
+    // Collect occupied rectangles for collision avoidance
+    var occupiedRects = [];
+    // Reserve waypoint positions
+    for (var wi = 0; wi < waypoints.length; wi++) {
+      var wpx = px(waypoints[wi].latlng.lng), wpy = py(waypoints[wi].latlng.lat);
+      occupiedRects.push({ x: wpx - 20, y: wpy - 20, w: 40, h: 40 });
+    }
+    // Reserve route line corridors
+    for (var ri = 0; ri < waypoints.length - 1; ri++) {
+      var ra = waypoints[ri].latlng, rb = waypoints[ri + 1].latlng;
+      var rx1 = px(ra.lng), ry1 = py(ra.lat), rx2 = px(rb.lng), ry2 = py(rb.lat);
+      var segLen = Math.sqrt((rx2 - rx1) * (rx2 - rx1) + (ry2 - ry1) * (ry2 - ry1));
+      var segSteps = Math.max(1, Math.floor(segLen / 30));
+      for (var rs = 0; rs <= segSteps; rs++) {
+        var t = rs / segSteps;
+        var sx = rx1 + (rx2 - rx1) * t, sy = ry1 + (ry2 - ry1) * t;
+        occupiedRects.push({ x: sx - 15, y: sy - 15, w: 30, h: 30 });
+      }
+    }
+
+    function rectsOverlap(a, b) {
+      return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+    }
+    function rectInBounds(rect) {
+      return rect.x >= 2 && rect.y >= 2 && rect.x + rect.w <= svgW - 2 && rect.y + rect.h <= svgH - 2;
+    }
+
+    if (asCallouts.length) {
+      svg += '<g>';
+      for (var ci = 0; ci < asCallouts.length; ci++) {
+        var co = asCallouts[ci];
+        var line1 = co.name.length > 22 ? co.name.substring(0, 22) + '…' : co.name;
+        var line2 = co.shortLabel + (co.alt ? '  ' + co.alt : '');
+        var boxW = Math.max(line1.length, line2.length) * 5.5 + 12;
+        if (boxW < 60) boxW = 60;
+        if (boxW > 140) boxW = 140;
+        var boxH = 26;
+
+        // Try candidate positions: 8 directions at 2 distances
+        var placed = false;
+        var bestX = co.cx + 20, bestY = co.cy - boxH / 2;
+        var distances = [45, 70, 100];
+        var angles = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, 3 * Math.PI / 4, -3 * Math.PI / 4, Math.PI];
+        for (var di = 0; di < distances.length && !placed; di++) {
+          for (var aj = 0; aj < angles.length && !placed; aj++) {
+            var candX = co.cx + distances[di] * Math.cos(angles[aj]) - boxW / 2;
+            var candY = co.cy + distances[di] * Math.sin(angles[aj]) - boxH / 2;
+            var candRect = { x: candX, y: candY, w: boxW, h: boxH };
+            if (!rectInBounds(candRect)) continue;
+            var collides = false;
+            for (var oi = 0; oi < occupiedRects.length; oi++) {
+              if (rectsOverlap(candRect, occupiedRects[oi])) { collides = true; break; }
+            }
+            if (!collides) {
+              bestX = candX; bestY = candY;
+              placed = true;
+            }
+          }
+        }
+
+        // Register this callout as occupied
+        occupiedRects.push({ x: bestX, y: bestY, w: boxW, h: boxH });
+
+        // Leader line from centroid to box edge
+        var boxCx = bestX + boxW / 2, boxCy = bestY + boxH / 2;
+        svg += '<line x1="' + r(co.cx) + '" y1="' + r(co.cy)
+          + '" x2="' + r(boxCx) + '" y2="' + r(boxCy)
+          + '" stroke="' + co.color + '" stroke-width="0.7" stroke-dasharray="2,2" opacity="0.6"/>';
+
+        // Callout box
+        svg += '<rect x="' + r(bestX) + '" y="' + r(bestY)
+          + '" width="' + r(boxW) + '" height="' + r(boxH)
+          + '" rx="3" fill="#fff" fill-opacity="0.92" stroke="' + co.color + '" stroke-width="0.8"/>';
+
+        // Text lines
+        svg += '<text x="' + r(bestX + 6) + '" y="' + r(bestY + 10)
+          + '" font-size="8" fill="' + co.color + '" font-weight="700">' + esc(line1) + '</text>';
+        svg += '<text x="' + r(bestX + 6) + '" y="' + r(bestY + 20)
+          + '" font-size="7" fill="#555">' + esc(line2) + '</text>';
+      }
+      svg += '</g>';
+    }
+
+    // Lat/lon grid lines (semi-transparent white for visibility on tile backgrounds)
     var latStep = niceStep(latRange, 5);
     var lonStep = niceStep(lonRange, 5);
     var startLat = Math.ceil(minLat / latStep) * latStep;
     var startLon = Math.ceil(minLon / lonStep) * lonStep;
     for (var gl = startLat; gl <= maxLat; gl += latStep) {
       var gy = py(gl);
-      svg += '<line x1="' + pad.left + '" y1="' + r(gy) + '" x2="' + (svgW - pad.right) + '" y2="' + r(gy) + '" stroke="#e0e4ea" stroke-width="0.5"/>';
-      svg += '<text x="' + (pad.left + 2) + '" y="' + r(gy - 3) + '" font-size="9" fill="#aaa">' + gl.toFixed(0) + '\u00b0</text>';
+      svg += '<line x1="' + pad.left + '" y1="' + r(gy) + '" x2="' + (svgW - pad.right) + '" y2="' + r(gy) + '" stroke="#fff" stroke-width="1" opacity="0.4"/>';
+      svg += '<text x="' + (pad.left + 3) + '" y="' + r(gy - 4) + '" font-size="9" fill="#fff" stroke="#000" stroke-width="2.5" paint-order="stroke" font-weight="600" opacity="0.7">' + gl.toFixed(0) + '\u00b0</text>';
     }
     for (var gn = startLon; gn <= maxLon; gn += lonStep) {
       var gx = px(gn);
-      svg += '<line x1="' + r(gx) + '" y1="' + pad.top + '" x2="' + r(gx) + '" y2="' + (svgH - pad.bottom) + '" stroke="#e0e4ea" stroke-width="0.5"/>';
-      svg += '<text x="' + r(gx + 2) + '" y="' + (svgH - pad.bottom - 3) + '" font-size="9" fill="#aaa">' + gn.toFixed(0) + '\u00b0</text>';
+      svg += '<line x1="' + r(gx) + '" y1="' + pad.top + '" x2="' + r(gx) + '" y2="' + (svgH - pad.bottom) + '" stroke="#fff" stroke-width="1" opacity="0.4"/>';
+      svg += '<text x="' + r(gx + 3) + '" y="' + (svgH - pad.bottom - 4) + '" font-size="9" fill="#fff" stroke="#000" stroke-width="2.5" paint-order="stroke" font-weight="600" opacity="0.7">' + gn.toFixed(0) + '\u00b0</text>';
     }
 
     // Route lines
@@ -2984,26 +3419,37 @@
       var x2 = px(b.lng), y2 = py(b.lat);
       var color = isAltLeg ? '#e67e22' : '#2980b9';
       var dash = isAltLeg ? ' stroke-dasharray="6,4"' : '';
-      svg += '<line x1="' + r(x1) + '" y1="' + r(y1) + '" x2="' + r(x2) + '" y2="' + r(y2) + '" stroke="' + color + '" stroke-width="2.5"' + dash + '/>';
+      svg += '<line x1="' + r(x1) + '" y1="' + r(y1) + '" x2="' + r(x2) + '" y2="' + r(y2) + '" stroke="#fff" stroke-width="5"' + dash + ' stroke-linecap="round"/>';
+      svg += '<line x1="' + r(x1) + '" y1="' + r(y1) + '" x2="' + r(x2) + '" y2="' + r(y2) + '" stroke="' + color + '" stroke-width="2.5"' + dash + ' stroke-linecap="round"/>';
 
-      // Leg annotation at midpoint: heading and distance
+      // Leg annotations at midpoint
       if (legs[i]) {
         var mx = (x1 + x2) / 2;
         var my = (y1 + y2) / 2;
         var hdg = Math.round(legs[i].magHdg);
         var dist = Math.round(legs[i].dist);
         var angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
-        // Keep text right-side up
-        if (angle > 90 || angle < -90) angle += 180;
-        // Offset perpendicular to the line
+        // Keep text right-side up; track if we flipped so perpendicular sides stay consistent
+        var flipped = false;
+        if (angle > 90 || angle < -90) { angle += 180; flipped = true; }
+        // Perpendicular direction (left side of travel direction in screen coords)
         var perpX = -(y2 - y1), perpY = x2 - x1;
         var perpLen = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
         var offLbl = 14;
+        // Heading / distance on one side
         var lx = mx + perpX / perpLen * offLbl;
         var ly = my + perpY / perpLen * offLbl;
-        svg += '<text x="' + r(lx) + '" y="' + r(ly) + '" font-size="10" fill="#555" text-anchor="middle"'
+        svg += '<text x="' + r(lx) + '" y="' + r(ly) + '" font-size="10" fill="#333" stroke="#fff" stroke-width="3" paint-order="stroke" font-weight="600" text-anchor="middle"'
           + ' transform="rotate(' + r(angle) + ' ' + r(lx) + ' ' + r(ly) + ')">'
           + hdg + '\u00b0 / ' + dist + 'nm</text>';
+        // Time / fuel on the opposite side
+        var timeMin = legs[i].time ? Math.round(legs[i].time * 60) : 0;
+        var fuelGal = legs[i].fuel ? legs[i].fuel.toFixed(1) : '?';
+        var lx2 = mx - perpX / perpLen * offLbl;
+        var ly2 = my - perpY / perpLen * offLbl;
+        svg += '<text x="' + r(lx2) + '" y="' + r(ly2) + '" font-size="9" fill="#666" stroke="#fff" stroke-width="3" paint-order="stroke" font-weight="600" text-anchor="middle"'
+          + ' transform="rotate(' + r(angle) + ' ' + r(lx2) + ' ' + r(ly2) + ')">'
+          + timeMin + 'min / ' + fuelGal + 'gal</text>';
       }
 
       // Arrow at midpoint
@@ -3015,6 +3461,99 @@
         + r(amx + ax * Math.cos(arrowAngle + 2.5)) + ',' + r(amy + ax * Math.sin(arrowAngle + 2.5)) + ' '
         + r(amx + ax * Math.cos(arrowAngle - 2.5)) + ',' + r(amy + ax * Math.sin(arrowAngle - 2.5))
         + '" fill="' + color + '"/>';
+    }
+
+    // Departure and arrival runway diagrams
+    var rwyEndpoints = [0]; // departure
+    var arrIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
+    if (arrIdx > 0 && rwyEndpoints.indexOf(arrIdx) === -1) rwyEndpoints.push(arrIdx);
+    for (var re = 0; re < rwyEndpoints.length; re++) {
+      var rwp = waypoints[rwyEndpoints[re]];
+      if (!rwp || !rwp.data || !rwp.data[10] || !rwp.data[10].length) continue;
+      var rwys = rwp.data[10];
+      var rcx = px(rwp.latlng.lng), rcy = py(rwp.latlng.lat);
+      // Scale: longest runway ≈ 70px
+      var maxLen = 0;
+      for (var rr = 0; rr < rwys.length; rr++) {
+        if (rwys[rr][1] > maxLen) maxLen = rwys[rr][1];
+      }
+      var rwyScale = maxLen > 0 ? 70 / maxLen : 0.005;
+
+      // Count parallel runways per heading for lateral offset
+      var pHdgCount = {};
+      for (var rr = 0; rr < rwys.length; rr++) {
+        var pm_ = (rwys[rr][0] || '').split('/')[0].trim().match(/^(\d{1,2})/);
+        if (!pm_) continue;
+        var phk = (parseInt(pm_[1], 10) * 10) % 180;
+        pHdgCount[phk] = (pHdgCount[phk] || 0) + 1;
+      }
+      var pHdgIdx = {};
+
+      svg += '<g>';
+      for (var rr = 0; rr < rwys.length; rr++) {
+        var rwy = rwys[rr];
+        var desig = rwy[0] || '';
+        var lenFt = rwy[1] || 0;
+        var widFt = rwy[2] || 60;
+        var parts = desig.split('/');
+        var m0 = parts[0] ? parts[0].trim().match(/^(\d{1,2})/) : null;
+        if (!m0) continue;
+        var hdgDeg = parseInt(m0[1], 10) * 10;
+        var rwyHdgRad = hdgDeg * Math.PI / 180;
+        var halfLen = lenFt * rwyScale / 2;
+        var rwyW = Math.max(widFt * rwyScale, 3);
+
+        // Lateral offset for parallel runways
+        var phk = hdgDeg % 180;
+        var nPar = pHdgCount[phk] || 1;
+        if (!pHdgIdx[phk]) pHdgIdx[phk] = 0;
+        var pIdx = pHdgIdx[phk]++;
+        var latOff = 0;
+        if (nPar > 1) {
+          var pSpacing = halfLen * 0.4;
+          latOff = (pIdx - (nPar - 1) / 2) * pSpacing;
+        }
+        // Perpendicular offset in SVG coords (dx,dy is along runway)
+        var dx = Math.sin(rwyHdgRad);
+        var dy = -Math.cos(rwyHdgRad);
+        var perpDx = -dy, perpDy = dx; // perpendicular to runway
+        var ocx = rcx + perpDx * latOff;
+        var ocy = rcy + perpDy * latOff;
+
+        var rx1 = ocx - dx * halfLen, ry1 = ocy - dy * halfLen;
+        var rx2 = ocx + dx * halfLen, ry2 = ocy + dy * halfLen;
+        svg += '<line x1="' + r(rx1) + '" y1="' + r(ry1) + '" x2="' + r(rx2) + '" y2="' + r(ry2)
+          + '" stroke="#fff" stroke-width="' + r(rwyW + 2) + '" stroke-linecap="butt"/>';
+        svg += '<line x1="' + r(rx1) + '" y1="' + r(ry1) + '" x2="' + r(rx2) + '" y2="' + r(ry2)
+          + '" stroke="#555" stroke-width="' + r(rwyW) + '" stroke-linecap="butt"/>';
+        svg += '<line x1="' + r(rx1) + '" y1="' + r(ry1) + '" x2="' + r(rx2) + '" y2="' + r(ry2)
+          + '" stroke="#ccc" stroke-width="0.5" stroke-dasharray="3,3"/>';
+        // Runway designators at each end
+        for (var ep = 0; ep < parts.length; ep++) {
+          var endName = parts[ep].trim();
+          var endM = endName.match(/^(\d{1,2})/);
+          if (!endM) continue;
+          var ex = ep === 0 ? rx1 : rx2;
+          var ey = ep === 0 ? ry1 : ry2;
+          var outDir = ep === 0 ? -1 : 1;
+          var tx = ex + outDir * dx * 12;
+          var ty = ey + outDir * dy * 12;
+          var textAngle = hdgDeg;
+          if (ep === 1) textAngle = (hdgDeg + 180) % 360;
+          if (textAngle > 90 && textAngle < 270) textAngle = (textAngle + 180) % 360;
+          svg += '<text x="' + r(tx) + '" y="' + r(ty) + '" font-size="8" fill="#333" stroke="#fff" stroke-width="2.5" paint-order="stroke" font-weight="700" text-anchor="middle" dominant-baseline="central"'
+            + ' transform="rotate(' + r(textAngle) + ' ' + r(tx) + ' ' + r(ty) + ')">'
+            + esc(endName) + '</text>';
+        }
+      }
+      // Elevation label below the airport
+      var elevFt = rwp.data[5];
+      if (elevFt) {
+        var maxHalf = maxLen * rwyScale / 2;
+        svg += '<text x="' + r(rcx) + '" y="' + r(rcy + maxHalf + 20) + '" font-size="8" fill="#555" stroke="#fff" stroke-width="2" paint-order="stroke" font-weight="600" text-anchor="middle">'
+          + Math.round(elevFt) + ' ft</text>';
+      }
+      svg += '</g>';
     }
 
     // Waypoint dots and labels
@@ -3037,7 +3576,7 @@
       var labelAnchor = 'start';
       // If waypoint is on the right side of the map, put label to the left
       if (cx > svgW * 0.7) { labelX = cx - 12; labelAnchor = 'end'; }
-      svg += '<text x="' + r(labelX) + '" y="' + r(cy + 4) + '" font-size="11" fill="#333" font-weight="600" text-anchor="' + labelAnchor + '">'
+      svg += '<text x="' + r(labelX) + '" y="' + r(cy + 4) + '" font-size="11" fill="#333" stroke="#fff" stroke-width="3" paint-order="stroke" font-weight="700" text-anchor="' + labelAnchor + '">'
         + esc(label) + (isAlt ? ' (ALT)' : '') + '</text>';
     }
 
@@ -3183,6 +3722,13 @@
       // Route map — full page
       + '.route-map-section svg { width: 100%; }'
       + '.route-map-section { page-break-inside: avoid; }'
+      // Weather + LLF + NOTAMs: flow together, page break before the group
+      + '.wx-section { page-break-before: always; }'
+      + '.llf-section, .notam-section { page-break-before: auto; }'
+      + '.llf-section { page-break-inside: avoid; }'
+      + '.llf-valid { font-size: 9px; color: #666; margin-bottom: 4px; }'
+      + '.llf-area-block { margin-bottom: 4px; font-size: 10px; }'
+      + '.llf-overview { font-size: 9px; color: #444; margin: 2px 0 4px 12px; font-style: italic; }'
       // Images
       + '.gramet-section img, .swc-section img { max-width: 100%; height: auto; }'
       + '.footer { margin-top: 16px; font-size: 8px; color: #999; border-top: 1px solid #ddd; padding-top: 4px; }'
@@ -3867,6 +4413,11 @@
 
     routeLayerGroup = L.layerGroup().addTo(map);
     routeWxMarkers = L.layerGroup().addTo(map);
+
+    // Re-render route on zoom to show/hide runway diagrams
+    map.on('zoomend', function () {
+      if (routeActive && waypoints.length >= 2) renderRouteOnMap();
+    });
 
     toggleBtn = document.getElementById('route-toggle');
     settingsDiv = document.getElementById('route-settings');

@@ -32,6 +32,16 @@
   };
   basemaps['Light'].addTo(map);
 
+  // Track active basemap for print map tiles
+  var activeBasemap = {
+    url: basemaps['Light']._url,
+    subdomains: basemaps['Light'].options.subdomains || 'abc'
+  };
+  map.on('baselayerchange', function (e) {
+    activeBasemap.url = e.layer._url;
+    activeBasemap.subdomains = e.layer.options.subdomains || 'abc';
+  });
+
   // Generate a pastel color from a string (country ISO code)
   function countryColor(str) {
     let hash = 0;
@@ -86,6 +96,8 @@
       return res.json();
     })
     .then(function (geojson) {
+      window.AirportApp = window.AirportApp || {};
+      window.AirportApp.europeGeoJson = geojson;
       countriesLayer = L.geoJSON(geojson, {
         style: styleCountry,
         onEachFeature: onEachCountry
@@ -393,42 +405,108 @@
   // --- Satellite + Radar overlays (ilmailusaa.fi WMS, CORS enabled) ---
   // Shared time offset for satellite & radar (minutes relative to now, rounded to 15 min)
   var imgTimeOffset = 0; // 0 = latest, -15 = 15 min ago, etc.
-  var imgActiveLayers = {}; // name → { wms, layerGroup }
+  var imgActiveLayers = {}; // name → { a, b, activeIs, layerGroup, opts, url }
+  var imgPlayTimer = null;
+  var IMG_STEP = 15;        // minutes per step
+  var IMG_PLAY_DELAY = 800; // ms between animation frames
 
-  function imgTimeIso() {
+  function imgTimeIso(offset) {
+    if (offset === undefined) offset = imgTimeOffset;
     var now = new Date();
-    // Round down to nearest 15 min, then apply offset
     now.setUTCMinutes(Math.floor(now.getUTCMinutes() / 15) * 15, 0, 0);
-    return new Date(now.getTime() + imgTimeOffset * 60000).toISOString().replace(/\.\d+Z$/, '.000Z');
+    return new Date(now.getTime() + offset * 60000).toISOString().replace(/\.\d+Z$/, '.000Z');
   }
 
-  function imgRefresh() {
-    var t = imgTimeOffset === 0 ? '' : imgTimeIso();
-    Object.keys(imgActiveLayers).forEach(function (name) {
-      var entry = imgActiveLayers[name];
-      if (t) {
-        entry.wms.setParams({ TIME: t });
-      } else {
-        // Remove TIME param to get server default (latest)
-        delete entry.wms.wmsParams.TIME;
-        entry.wms.redraw();
-      }
-    });
-    // Update label
-    var label = document.getElementById('wx-time-label');
-    if (imgTimeOffset === 0) {
-      label.textContent = 'Now';
+  function imgTimeLabel(offset) {
+    if (offset === 0) return 'Now';
+    var d = new Date(imgTimeIso(offset));
+    var hh = d.getUTCHours(); var mm = d.getUTCMinutes();
+    return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + 'Z';
+  }
+
+  function imgSetTime(wms, offset) {
+    if (offset === 0) {
+      delete wms.wmsParams.TIME;
+      wms.redraw();
     } else {
-      // Show the actual rounded time we're requesting
-      var iso = imgTimeIso();
-      var d = new Date(iso);
-      var hh = d.getUTCHours(); var mm = d.getUTCMinutes();
-      label.textContent = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + 'Z';
+      wms.setParams({ TIME: imgTimeIso(offset) });
     }
   }
 
+  // Swap double-buffered layers: load new time on hidden layer, then swap
+  function imgRefresh(cb) {
+    var names = Object.keys(imgActiveLayers);
+    if (!names.length) return;
+    var pending = names.length;
+    names.forEach(function (name) {
+      var entry = imgActiveLayers[name];
+      // The hidden buffer layer
+      var buf = entry.activeIs === 'a' ? entry.b : entry.a;
+      var cur = entry.activeIs === 'a' ? entry.a : entry.b;
+      // Set time on buffer
+      imgSetTime(buf, imgTimeOffset);
+      // Add buffer to map (hidden via opacity 0)
+      if (!map.hasLayer(buf)) buf.addTo(entry.layerGroup);
+      buf.setOpacity(0);
+      // Once buffer tiles load, swap
+      buf.once('load', function () {
+        buf.setOpacity(entry.opts.opacity || 0.7);
+        if (map.hasLayer(cur)) entry.layerGroup.removeLayer(cur);
+        entry.activeIs = entry.activeIs === 'a' ? 'b' : 'a';
+        pending--;
+        if (pending <= 0 && cb) cb();
+      });
+      // Fallback timeout in case 'load' doesn't fire
+      setTimeout(function () {
+        if (buf.options.opacity === 0) {
+          buf.setOpacity(entry.opts.opacity || 0.7);
+          if (map.hasLayer(cur)) entry.layerGroup.removeLayer(cur);
+          entry.activeIs = entry.activeIs === 'a' ? 'b' : 'a';
+          if (pending > 0) { pending = 0; if (cb) cb(); }
+        }
+      }, 5000);
+    });
+    // Update label
+    document.getElementById('wx-time-label').textContent = imgTimeLabel(imgTimeOffset);
+  }
+
+  // Simple refresh without double-buffer (for initial load)
+  function imgRefreshSimple() {
+    Object.keys(imgActiveLayers).forEach(function (name) {
+      var entry = imgActiveLayers[name];
+      var cur = entry.activeIs === 'a' ? entry.a : entry.b;
+      imgSetTime(cur, imgTimeOffset);
+    });
+    document.getElementById('wx-time-label').textContent = imgTimeLabel(imgTimeOffset);
+  }
+
   function imgShowBar() {
-    document.getElementById('wx-time-bar').style.display = Object.keys(imgActiveLayers).length ? 'flex' : 'none';
+    var hasLayers = Object.keys(imgActiveLayers).length > 0;
+    document.getElementById('wx-time-bar').style.display = hasLayers ? 'flex' : 'none';
+    if (!hasLayers) imgStopPlay();
+  }
+
+  function imgStopPlay() {
+    if (imgPlayTimer) { clearInterval(imgPlayTimer); imgPlayTimer = null; }
+    var btn = document.getElementById('wx-time-play');
+    if (btn) btn.textContent = '\u25B6'; // ▶
+  }
+
+  function imgTogglePlay() {
+    if (imgPlayTimer) {
+      imgStopPlay();
+      return;
+    }
+    var btn = document.getElementById('wx-time-play');
+    if (btn) btn.textContent = '\u275A\u275A'; // ❚❚ pause
+    // Start from -3h if at Now
+    if (imgTimeOffset === 0) imgTimeOffset = -180;
+    imgRefreshSimple();
+    imgPlayTimer = setInterval(function () {
+      imgTimeOffset += IMG_STEP;
+      if (imgTimeOffset > 0) imgTimeOffset = -180; // loop
+      imgRefresh();
+    }, IMG_PLAY_DELAY);
   }
 
   function setupImageLayer(name, layerGroup, wmsUrl, layerName, extraOpts) {
@@ -442,14 +520,16 @@
       attribution: '&copy; FMI'
     };
     if (extraOpts) Object.keys(extraOpts).forEach(function (k) { opts[k] = extraOpts[k]; });
-    var wms = L.tileLayer.wms(wmsUrl, opts);
+    // Create two WMS layers for double-buffering
+    var wmsA = L.tileLayer.wms(wmsUrl, Object.assign({}, opts));
+    var wmsB = L.tileLayer.wms(wmsUrl, Object.assign({}, opts));
 
     map.on('overlayadd', function (e) {
       if (e.name === name) {
-        wms.addTo(layerGroup);
-        imgActiveLayers[name] = { wms: wms, layerGroup: layerGroup };
+        wmsA.addTo(layerGroup);
+        imgActiveLayers[name] = { a: wmsA, b: wmsB, activeIs: 'a', layerGroup: layerGroup, opts: opts, url: wmsUrl };
         if (imgTimeOffset !== 0) {
-          wms.setParams({ TIME: imgTimeIso() });
+          imgSetTime(wmsA, imgTimeOffset);
         }
         imgShowBar();
       }
@@ -468,19 +548,23 @@
     var bar = document.getElementById('wx-time-bar');
     if (!bar) return;
     document.getElementById('wx-time-back').addEventListener('click', function () {
-      imgTimeOffset -= 180; imgRefresh();  // -3 hours
+      imgStopPlay(); imgTimeOffset -= 180; imgRefresh();
     });
     document.getElementById('wx-time-back1').addEventListener('click', function () {
-      imgTimeOffset -= 15; imgRefresh();   // -15 min
+      imgStopPlay(); imgTimeOffset -= IMG_STEP; imgRefresh();
     });
     document.getElementById('wx-time-fwd1').addEventListener('click', function () {
-      if (imgTimeOffset < 0) { imgTimeOffset += 15; imgRefresh(); }
+      imgStopPlay();
+      if (imgTimeOffset < 0) { imgTimeOffset += IMG_STEP; imgRefresh(); }
     });
     document.getElementById('wx-time-fwd').addEventListener('click', function () {
-      imgTimeOffset = Math.min(0, imgTimeOffset + 180); imgRefresh();
+      imgStopPlay(); imgTimeOffset = Math.min(0, imgTimeOffset + 180); imgRefresh();
     });
     document.getElementById('wx-time-now').addEventListener('click', function () {
-      imgTimeOffset = 0; imgRefresh();
+      imgStopPlay(); imgTimeOffset = 0; imgRefresh();
+    });
+    document.getElementById('wx-time-play').addEventListener('click', function () {
+      imgTogglePlay();
     });
   })();
 
@@ -1134,6 +1218,8 @@
     }
 
     function renderAirspaces(items) {
+      var app = window.AirportApp = window.AirportApp || {};
+      if (!app.airspaceItems) app.airspaceItems = [];
       items.forEach(function (item) {
         var id = item._id || item.id;
         if (loadedIds[id]) return;
@@ -1149,6 +1235,10 @@
         if (notam) activation = 'active';
         // Store NOTAM ref for popup
         item._activatingNotam = notam;
+        item._activation = activation;
+
+        // Expose for print/export
+        app.airspaceItems.push(item);
 
         var typeInfo = AIRSPACE_TYPES[item.type] || { label: 'Airspace', color: '#888' };
         var isActive = activation === 'active';
@@ -1160,14 +1250,22 @@
             opacity: isActive ? 0.8 : 0.35,
             fillColor: typeInfo.color,
             fillOpacity: isActive ? 0.2 : 0.05,
-            dashArray: isActive ? null : '4,6'
+            dashArray: isActive ? null : '4,6',
+            bubblingMouseEvents: false
           }
         });
 
-        polygon.bindPopup(airspacePopupHtml(item), {
-          maxWidth: 420,
-          minWidth: 280,
-          className: 'airspace-popup-wrapper'
+        polygon.on('click', function (e) {
+          if (window.AirportApp && window.AirportApp.routeMode) {
+            if (window.AirportApp.addMapWaypoint) {
+              window.AirportApp.addMapWaypoint(e.latlng);
+            }
+            return;
+          }
+          polygon.unbindPopup();
+          polygon.bindPopup(airspacePopupHtml(item), {
+            maxWidth: 420, minWidth: 280, className: 'airspace-popup-wrapper'
+          }).openPopup(e.latlng);
         });
 
         polygon.addTo(layerGroup);
@@ -1223,6 +1321,7 @@
       if (e.layer === layerGroup) {
         layerGroup.clearLayers();
         loadedIds = {};
+        if (window.AirportApp) window.AirportApp.airspaceItems = [];
       }
     });
 
@@ -1493,6 +1592,7 @@
     window.AirportApp = window.AirportApp || {};
     window.AirportApp.map = map;
     window.AirportApp.overlays = overlays;
+    window.AirportApp.activeBasemap = activeBasemap;
     window.AirportApp.layerControl = L.control.layers(basemaps, overlays, {
       collapsed: true,
       position: 'topright'
@@ -1514,10 +1614,54 @@
       'skandinavia_rr_eureffin',
       { attribution: '&copy; FMI' });
 
+    // Lightning overlay (ilmailusaa.fi GeoServer WMS, CORS enabled)
+    var lightningLayer = L.layerGroup();
+    setupImageLayer('Lightning', lightningLayer,
+      'https://www.ilmailusaa.fi/geoserver/Satellite/wms',
+      'sat_geo_eur_li-10min_flash_count',
+      { styles: 'li_lfl_heatmap', attribution: '&copy; FMI / EUMETSAT' });
+
+    // CB/TCU overlay (ilmailusaa.fi GeoServer WMS, CORS enabled)
+    var cbtcuLayer = L.layerGroup();
+    setupImageLayer('CB/TCU', cbtcuLayer,
+      'https://www.ilmailusaa.fi/geoserver/Radar/wms',
+      'radar_cbtcu', { attribution: '&copy; FMI' });
+
+    // Fog overlay (ilmailusaa.fi GeoServer WMS, CORS enabled)
+    var fogLayer = L.layerGroup();
+    setupImageLayer('Fog', fogLayer,
+      'https://www.ilmailusaa.fi/geoserver/Satellite/wms',
+      'sat_geo_eur_seviri-15min_hrv_fog_with_night_micro',
+      { attribution: '&copy; FMI / EUMETSAT' });
+
+    // Radar+4h nowcast overlay (no time bar – shows future forecast)
+    var nowcastLayer = L.layerGroup();
+    var nowcastWms = L.tileLayer.wms(
+      'https://www.ilmailusaa.fi/geoserver/Radar/wms', {
+      layers: 'radar_fmippn_nowcast_deterministic_dbzh',
+      styles: 'radar_dbz_summer_8_50',
+      format: 'image/png',
+      transparent: true,
+      version: '1.1.1',
+      opacity: 0.7,
+      zIndex: 500,
+      attribution: '&copy; FMI'
+    });
+    map.on('overlayadd', function (e) {
+      if (e.name === 'Radar+4h') nowcastWms.addTo(nowcastLayer);
+    });
+    map.on('overlayremove', function (e) {
+      if (e.name === 'Radar+4h') nowcastLayer.clearLayers();
+    });
+
     // Weather radio-button control (below main control)
     var wxOverlays = {
       'Sat. Image': satLayer,
       'Radar': radarLayer,
+      'Radar+4h': nowcastLayer,
+      'Lightning': lightningLayer,
+      'CB/TCU': cbtcuLayer,
+      'Fog': fogLayer,
       'SIGMETs': sigmetLayer,
       'LLF': llfLayer
     };
@@ -1543,6 +1687,64 @@
       }
     });
     new SwcControl().addTo(map);
+
+    // Device location control
+    var locMarker = null;
+    var locCircle = null;
+    var locWatchId = null;
+
+    function updateLocMarker(lat, lon, acc) {
+      var latlng = L.latLng(lat, lon);
+      if (!locMarker) {
+        locMarker = L.circleMarker(latlng, {
+          radius: 7, fillColor: '#4285f4', fillOpacity: 1,
+          color: '#fff', weight: 2, interactive: false
+        }).addTo(map);
+        locCircle = L.circle(latlng, {
+          radius: acc, color: '#4285f4', fillColor: '#4285f4',
+          fillOpacity: 0.1, weight: 1, interactive: false
+        }).addTo(map);
+      } else {
+        locMarker.setLatLng(latlng);
+        locCircle.setLatLng(latlng).setRadius(acc);
+      }
+    }
+
+    var LocControl = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd: function () {
+        var btn = L.DomUtil.create('div', 'leaflet-bar locate-control');
+        btn.innerHTML = '<a href="#" title="Show my location">&#9737;</a>';
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', function (e) {
+          L.DomEvent.preventDefault(e);
+          if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+          if (locWatchId != null) {
+            // Toggle off
+            navigator.geolocation.clearWatch(locWatchId);
+            locWatchId = null;
+            if (locMarker) { map.removeLayer(locMarker); map.removeLayer(locCircle); locMarker = null; locCircle = null; }
+            btn.classList.remove('locate-active');
+            return;
+          }
+          btn.classList.add('locate-active');
+          locWatchId = navigator.geolocation.watchPosition(
+            function (pos) {
+              updateLocMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+              // Pan to location on first fix
+              if (!locMarker._panned) {
+                map.setView([pos.coords.latitude, pos.coords.longitude], Math.max(map.getZoom(), 10));
+                locMarker._panned = true;
+              }
+            },
+            function () { btn.classList.remove('locate-active'); },
+            { enableHighAccuracy: true, maximumAge: 10000 }
+          );
+        });
+        return btn;
+      }
+    });
+    new LocControl().addTo(map);
 
     // Weather detail popup on map click when a weather layer is active
     setupWeatherPopup();
@@ -2738,6 +2940,149 @@
   window.AirportApp.AIRGRAM_LEVELS = AIRGRAM_LEVELS;
   window.AirportApp.routeAirgramCache = routeAirgramCache;
   window.AirportApp.streamBriefing = streamBriefing;
+
+  // --- LLF briefing helpers ---
+  function llfAreaForCoord(lat, lon) {
+    if (lat >= 57.5 && lat < 60 && lon >= 21 && lon <= 28) return 'ee4';
+    if (lon >= 20 && lon <= 32) {
+      if (lat >= 65 && lat <= 71) return 'fi3';
+      if (lat >= 62) return 'fi2';
+      if (lat >= 59.5) return 'fi1';
+    }
+    if (lat >= 54 && lat < 58) {
+      if (lon >= 8 && lon < 11) return 'dk5';
+      if (lon >= 11 && lon < 16) return 'dk6';
+    }
+    if (lon >= 10 && lon < 21) {
+      if (lat >= 65 && lat <= 69) return 'se4';
+      if (lat >= 62) return 'se3';
+      if (lat >= 58) return 'se2';
+      if (lat >= 55) return 'se1';
+    }
+    return null;
+  }
+
+  function fetchLlfForBriefing(areas) {
+    var unique = [];
+    (areas || []).forEach(function (a) { if (a && unique.indexOf(a) === -1) unique.push(a); });
+    if (!unique.length) return Promise.resolve(null);
+
+    return fetch(LLF_BASE + '/getValidTimes?validForecast=true')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var steps = data.llfo || [];
+        if (!steps.length) return null;
+        var now = Date.now(), idx = 0;
+        for (var i = 0; i < steps.length; i++) {
+          var mid = (new Date(steps[i].valid[0]).getTime() + new Date(steps[i].valid[1]).getTime()) / 2;
+          if (now >= mid) idx = i;
+        }
+        var step = steps[idx];
+        var tsKey = step.valid[0];
+
+        var fetches = [];
+        unique.forEach(function (area) {
+          if (area.indexOf('fi') === 0) {
+            fetches.push(
+              fetch(LLF_BASE + '/getValidForecast/' + area + '/overview?type=llfo')
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                  var s = d.timeSteps || [];
+                  if (s.length) {
+                    var feats = (s[s.length - 1].forecast && s[s.length - 1].forecast.features) || [];
+                    if (feats.length && feats[0].properties && feats[0].properties.parameters && feats[0].properties.parameters.overview) {
+                      return { area: area, type: 'overview', data: feats[0].properties.parameters.overview.english };
+                    }
+                  }
+                  return null;
+                }).catch(function () { return null; })
+            );
+          }
+          fetches.push(
+            fetch(LLF_BASE + '/getValidForecast/' + area + '/vis-cld?type=llfo')
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                var ts = d.timeSteps || [], matched = null;
+                for (var i = 0; i < ts.length; i++) { if (ts[i].valid[0] === tsKey) { matched = ts[i]; break; } }
+                if (!matched || !matched.forecast) return null;
+                var worstVis = 9999, worstCld = 9999, wxItems = [];
+                (matched.forecast.features || []).forEach(function (f) {
+                  var p = f.properties && f.properties.parameters;
+                  if (!p) return;
+                  var vis = p.visibility && p.visibility.general;
+                  var cld = p.cloudbase && p.cloudbase.general;
+                  if (vis && vis.from < worstVis) worstVis = vis.from;
+                  if (cld && cld.from < worstCld) worstCld = cld.from;
+                  if (p.weather) {
+                    Object.keys(p.weather).forEach(function (k) { if (p.weather[k] && wxItems.indexOf(k) === -1) wxItems.push(k); });
+                  }
+                });
+                return { area: area, type: 'viscld', data: { vis: worstVis, cld: worstCld, wx: wxItems } };
+              }).catch(function () { return null; })
+          );
+          fetches.push(
+            fetch(LLF_BASE + '/getValidForecast/' + area + '/ice?type=llfo')
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                var ts = d.timeSteps || [], matched = null;
+                for (var i = 0; i < ts.length; i++) { if (ts[i].valid[0] === tsKey) { matched = ts[i]; break; } }
+                if (!matched || !matched.forecast) return null;
+                var items = [];
+                (matched.forecast.features || []).forEach(function (f) {
+                  var p = f.properties && f.properties.parameters;
+                  if (!p || !p.intensity) return;
+                  items.push({
+                    intensity: (p.intensity.from || '') + (p.intensity.to && p.intensity.to !== p.intensity.from ? '-' + p.intensity.to : ''),
+                    altitude: p.altitude ? (p.altitude.from || '?') + '-' + (p.altitude.to || '?') + ' ft' : 'N/A'
+                  });
+                });
+                return items.length ? { area: area, type: 'ice', data: items } : null;
+              }).catch(function () { return null; })
+          );
+          fetches.push(
+            fetch(LLF_BASE + '/getValidForecast/' + area + '/zero?type=llfo')
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                var ts = d.timeSteps || [], matched = null;
+                for (var i = 0; i < ts.length; i++) { if (ts[i].valid[0] === tsKey) { matched = ts[i]; break; } }
+                if (!matched || !matched.forecast) return null;
+                var feats = (matched.forecast.features) || [];
+                if (feats.length && feats[0].properties && feats[0].properties.parameters) {
+                  return { area: area, type: 'zero', data: feats[0].properties.parameters.freezinglvl };
+                }
+                return null;
+              }).catch(function () { return null; })
+          );
+        });
+
+        return Promise.all(fetches).then(function (results) {
+          var llf = { validFrom: step.valid[0], validTo: step.valid[1], title: step.title, areas: {} };
+          results.forEach(function (r) {
+            if (!r) return;
+            if (!llf.areas[r.area]) llf.areas[r.area] = {};
+            if (r.type === 'overview') llf.areas[r.area].overview = r.data;
+            if (r.type === 'viscld') {
+              llf.areas[r.area].visibility_m = r.data.vis;
+              llf.areas[r.area].ceiling_ft = r.data.cld;
+              if (r.data.wx.length) llf.areas[r.area].weather = r.data.wx;
+            }
+            if (r.type === 'ice') llf.areas[r.area].icing = r.data;
+            if (r.type === 'zero') llf.areas[r.area].freezingLevel = r.data;
+          });
+          return Object.keys(llf.areas).length ? llf : null;
+        });
+      })
+      .catch(function () { return null; });
+  }
+
+  window.AirportApp.llfAreaForCoord = llfAreaForCoord;
+  window.AirportApp.fetchLlfForBriefing = fetchLlfForBriefing;
+  window.AirportApp.AIRSPACE_TYPES = AIRSPACE_TYPES;
+  window.AirportApp.formatAirspaceLimit = formatAirspaceLimit;
+  window.AirportApp.classifyAirspaceActivation = classifyAirspaceActivation;
+  window.AirportApp.COUNTRY_FIRS = COUNTRY_FIRS;
+  window.AirportApp.extractActiveDesignators = extractActiveDesignators;
+  window.AirportApp.findNotamForAirspace = findNotamForAirspace;
 
   // --- Settings persistence (localStorage) ---
   var STORAGE_KEY = 'airports-panel-settings';

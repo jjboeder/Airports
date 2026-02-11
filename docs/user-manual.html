@@ -170,9 +170,13 @@
   <li>Multi-leg route planning with fuel calculations, wind adjustments, and icing warnings</li>
   <li>Weight &amp; Balance calculator with CG envelope visualization</li>
   <li>Export to Garmin FPL, GPX, and printable flight plans</li>
-  <li>Weather tiles (wind, clouds, precipitation, pressure, temperature) and wind barbs overlay</li>
+  <li>Weather tiles (wind, clouds, precipitation, pressure, temperature)</li>
+  <li>Aviation weather overlays: satellite imagery, radar, lightning, CB/TCU, fog, nowcast, SIGMETs, LLF</li>
+  <li>Airspace overlays: OpenAIP airspace tiles, R/D/P areas with NOTAM activation, navaids and reporting points</li>
   <li>AMA (Absolute Minimum Altitude) grid and obstacle markers</li>
-  <li>Significant Weather Chart (SWC) viewer</li>
+  <li>Significant Weather Chart (SWC) viewer for Finland, Nordic, and Europe</li>
+  <li>Airport search by ICAO, IATA, or name</li>
+  <li>Device GPS location tracking</li>
 </ul>
 
 <div class="info-box">
@@ -183,7 +187,7 @@
 <h2 id="map-layers" class="page-break">2. Map &amp; Layers</h2>
 
 <h3>2.1 Basemaps</h3>
-<p>Six basemap styles are available via the layer control (top-right corner):</p>
+<p>Five basemap styles are available via the layer control (top-right corner):</p>
 <table>
   <tr><th>Basemap</th><th>Description</th><th>Best for</th></tr>
   <tr><td>Light (default)</td><td>CARTO Light &mdash; clean, muted colors</td><td>General planning, day use</td></tr>
@@ -191,23 +195,25 @@
   <tr><td>OpenStreetMap</td><td>Standard OSM tiles</td><td>Detailed road/feature reference</td></tr>
   <tr><td>Topo</td><td>OpenTopoMap &mdash; contour lines, terrain shading</td><td>Terrain awareness</td></tr>
   <tr><td>Satellite</td><td>Esri World Imagery</td><td>Visual identification, runway orientation</td></tr>
-  <tr><td>Stadia Smooth</td><td>Stadia Alidade Smooth &mdash; pastel tones</td><td>Aesthetic overview</td></tr>
 </table>
+<p>The selected basemap is also used as the background in printed route maps.</p>
 
 <h3>2.2 Overlay Layers</h3>
-<p>Toggle these on/off via the layer control:</p>
+<p>Toggle these on/off via the main layer control (globe icon, top-right):</p>
 <table>
   <tr><th>Overlay</th><th>Description</th></tr>
-  <tr><td>Country boundaries</td><td>GeoJSON borders with hover highlight</td></tr>
+  <tr><td>Country boundaries</td><td>GeoJSON borders</td></tr>
   <tr><td>Large / Medium / Small airports</td><td>Airport markers by type (visibility depends on zoom level)</td></tr>
   <tr><td>METAR weather</td><td>Color-codes airport markers by flight category (enabled by default)</td></tr>
   <tr><td>AMA Grid</td><td>1&deg;&times;1&deg; cells showing Absolute Minimum Altitude (feet) with color-coded borders</td></tr>
   <tr><td>Obstacles</td><td>Significant obstacles from AMA data (AGL &amp; AMSL heights)</td></tr>
-  <tr><td>Wind barbs</td><td>Surface wind barbs on a grid, auto-refreshing every 10 minutes</td></tr>
+  <tr><td>Airspace</td><td>OpenAIP airspace tile overlay showing controlled airspace, CTRs, TMA zones</td></tr>
+  <tr><td>R/D/P Areas</td><td>Interactive Restricted, Danger, and Prohibited airspace polygons (see <a href="#airspace-rdp">Section 2.6</a>)</td></tr>
+  <tr><td>Reporting Points</td><td>Navaids (VOR, NDB, DME) and VFR reporting points from OpenAIP (zoom &ge; 7)</td></tr>
 </table>
 
 <h3>2.3 Weather Tile Layers</h3>
-<p>A separate radio-button layer control (below the main control) offers OpenWeatherMap tile overlays. Only one can be active at a time:</p>
+<p>A separate radio-button layer control (below the main control) offers OpenWeatherMap tile overlays. Only one OWM layer can be active at a time:</p>
 <ul>
   <li><strong>Wind</strong> &mdash; color-coded surface wind speed</li>
   <li><strong>Clouds</strong> &mdash; cloud cover opacity</li>
@@ -216,10 +222,66 @@
   <li><strong>Temperature</strong> &mdash; surface temperature gradient</li>
 </ul>
 
-<h3>2.4 SWC (Significant Weather Chart)</h3>
-<p>Click the <strong>SWC</strong> button (top-right) to open a floating panel showing the latest Significant Weather Chart for Scandinavia from <strong>ilmailusaa.fi</strong> (Finnish Aviation Weather). The valid time is displayed in the header, and a link to the original PDF is provided when available.</p>
+<h3>2.4 Aviation Weather Overlays</h3>
+<p>The weather layer control also includes aviation-specific overlays from <strong>ilmailusaa.fi</strong> (Finnish Aviation Weather) and other sources. Multiple can be active simultaneously:</p>
+<table>
+  <tr><th>Overlay</th><th>Source</th><th>Description</th></tr>
+  <tr><td>Sat. Image</td><td>FMI / EUMETSAT</td><td>Satellite imagery (realistic colors HRV with IR), Europe-wide</td></tr>
+  <tr><td>Radar</td><td>FMI</td><td>Precipitation radar composite, Scandinavia coverage</td></tr>
+  <tr><td>Radar+4h</td><td>FMI</td><td>Radar-based nowcast (deterministic precipitation forecast ~4 hours ahead), Finland</td></tr>
+  <tr><td>Lightning</td><td>FMI / EUMETSAT</td><td>Lightning flash count heatmap (10-minute updates), Europe-wide</td></tr>
+  <tr><td>CB/TCU</td><td>FMI</td><td>Cumulonimbus and towering cumulus detection (0=None, 100=TCU, 200=CB), Finland</td></tr>
+  <tr><td>Fog</td><td>FMI / EUMETSAT</td><td>Fog detection (day: HRV fog RGB, night: IR microphysical), Europe-wide</td></tr>
+  <tr><td>SIGMETs</td><td>OpenWeatherMap</td><td>Active SIGMET areas over Europe (TS, TURB, ICE, VA, MTW) with color coding</td></tr>
+  <tr><td>LLF</td><td>ilmailusaa.fi</td><td>Low Level Forecast &mdash; VIS/ceiling/icing/wind for Nordic areas (see <a href="#llf-overlay">Section 2.5</a>)</td></tr>
+</table>
 
-<h3>2.5 Weather Popup</h3>
+<h3>2.4.1 Time Control Bar</h3>
+<p>When satellite, radar, lightning, CB/TCU, or fog overlays are active, a time control bar appears at the top of the map. It provides:</p>
+<ul>
+  <li><strong>&laquo; / &raquo;</strong> &mdash; jump back/forward 3 hours</li>
+  <li><strong>&lsaquo; / &rsaquo;</strong> &mdash; step back/forward 15 minutes</li>
+  <li><strong>Play</strong> &mdash; animate through the last 3 hours in a loop</li>
+  <li><strong>Now</strong> &mdash; reset to the latest data</li>
+</ul>
+<p>The overlays use double-buffered WMS tile loading for smooth transitions when stepping through time.</p>
+
+<h3 id="llf-overlay">2.5 LLF (Low Level Forecast)</h3>
+<p>The LLF overlay shows forecast VIS/ceiling zones for 10 Nordic areas (Finland, Sweden, Denmark, Estonia) from <strong>ilmailusaa.fi</strong>. When active, a time step bar appears with buttons for each forecast period. Clicking a zone shows a detailed popup with:</p>
+<ul>
+  <li>Flight category (VFR/MVFR/IFR/LIFR) with color-coded cross symbols for general and local conditions</li>
+  <li>Visibility and cloud base ranges (general and local)</li>
+  <li>Present weather, icing layers, freezing level, cloud tops</li>
+  <li>Wind barbs rendered as WMS overlay</li>
+  <li>Overview text (for Finnish areas)</li>
+</ul>
+
+<h3 id="airspace-rdp">2.6 R/D/P Areas (Airspace)</h3>
+<p>The R/D/P Areas overlay shows interactive polygons for Restricted (R), Danger (D), and Prohibited (P) airspace from OpenAIP. Areas are loaded when zoomed to level 7+:</p>
+<ul>
+  <li><strong>Active</strong> areas (confirmed via schedule or NOTAM) are shown with solid borders and fill</li>
+  <li><strong>Potentially active</strong> areas (H24 or unknown schedule) are shown faintly with dashed borders</li>
+  <li>Click an area to see: type, name, vertical limits, validity period, operating hours, weekly schedule, frequencies, NOTAM activation details</li>
+  <li>The system cross-references area NOTAMs from European FIRs to identify NOTAM-activated areas</li>
+  <li>In route mode, clicking an R/D/P area adds a waypoint instead of showing details</li>
+</ul>
+
+<h3>2.7 SWC (Significant Weather Chart)</h3>
+<p>Click the <strong>SWC</strong> button (top-right) to open a floating panel showing the latest Significant Weather Chart. Three region tabs are available:</p>
+<table>
+  <tr><th>Region</th><th>Source</th><th>Notes</th></tr>
+  <tr><td>Finland</td><td>ilmailusaa.fi</td><td>SWC for Scandinavia, PDF link available</td></tr>
+  <tr><td>Nordic</td><td>MET Norway (api.met.no)</td><td>Nordic sigchart</td></tr>
+  <tr><td>Europe</td><td>WAFC London (via proxy)</td><td>EUR SIGWX chart, nearest 6h UTC slot</td></tr>
+</table>
+
+<h3>2.8 Search</h3>
+<p>The search bar (top-left) allows searching airports by ICAO code, IATA code, or name. Results appear as you type (minimum 2 characters). Clicking a result pans the map to that airport and opens its popup.</p>
+
+<h3>2.9 Device Location</h3>
+<p>Click the location button (&odot;, top-left below zoom controls) to show your current position on the map using the device's GPS. A blue dot shows your position with an accuracy circle. On first fix, the map pans to your location. Click the button again to disable tracking. Uses <code>enableHighAccuracy: true</code> for GPS on mobile devices.</p>
+
+<h3>2.10 Weather Popup</h3>
 <p>Clicking anywhere on the map (when not in route mode) opens a weather popup showing:</p>
 <ul>
   <li>Current conditions: temperature, feels-like, wind (knots), visibility, QNH</li>
@@ -235,8 +297,8 @@
 <table>
   <tr><th>Type</th><th>Color</th><th>Dot Size</th><th>Min Zoom</th></tr>
   <tr><td>Large airport</td><td><span class="color-swatch" style="background:#e74c3c"></span> Red</td><td>12 px</td><td>Always visible</td></tr>
-  <tr><td>Medium airport</td><td><span class="color-swatch" style="background:#3498db"></span> Blue</td><td>9 px</td><td>Zoom &ge; 6</td></tr>
-  <tr><td>Small airport</td><td><span class="color-swatch" style="background:#27ae60"></span> Green</td><td>6 px</td><td>Zoom &ge; 8</td></tr>
+  <tr><td>Medium airport</td><td><span class="color-swatch" style="background:#3498db"></span> Blue</td><td>12 px</td><td>Zoom &ge; 6</td></tr>
+  <tr><td>Small airport</td><td><span class="color-swatch" style="background:#27ae60"></span> Green</td><td>12 px</td><td>Zoom &ge; 8</td></tr>
 </table>
 
 <h3>3.2 Filtering</h3>
@@ -248,8 +310,8 @@
 <h3>3.4 METAR Overlay Markers</h3>
 <p>When the METAR layer is active, airport dots are replaced by larger circles containing a letter indicating the flight category (V, M, B, I, L). The marker tooltip also updates to show wind, temperature, and icing status. METARs refresh every 5 minutes for airports in the current viewport, fetched in batches of 50.</p>
 
-<h3>3.5 Weather Filter</h3>
-<p>In the Legend panel, the <strong>"Hide IFR/LIFR airports"</strong> checkbox removes airports with IFR or LIFR conditions from the map when the METAR layer is active. This helps focus on airports with flyable weather.</p>
+<h3>3.5 Runway Filter</h3>
+<p>In the Legend panel, the <strong>"Hide short/unpaved runways"</strong> checkbox (enabled by default) filters out airports that only have short (&lt;800 m) or unpaved runways. This keeps the map focused on airports suitable for the DA62.</p>
 
 <!-- ═══════════════════════════════════════════════════ -->
 <h2 id="airport-popup" class="page-break">4. Airport Popup</h2>
@@ -270,7 +332,17 @@
   <tr><th>Tab</th><th>Contents</th></tr>
   <tr>
     <td><strong>Info</strong></td>
-    <td>ATC level (Approach/Tower, TWR, AFIS/Radio, CTAF/UNICOM, Uncontrolled), frequencies, estimated fuel availability, operating hours, parking. External links: AIP, Google, SkyVector, OurAirports, Windy.</td>
+    <td>
+      ATC level (Approach/Tower, TWR, AFIS/Radio, CTAF/UNICOM, Uncontrolled), frequencies, operating hours. Runway table with designators, dimensions (m), surface type, and wind analysis when METAR is available (headwind/tailwind, crosswind, best/worst runway). When OpenAIP data is available, also shows:
+      <ul style="margin:4px 0 0 16px;">
+        <li>Fuel types (AVGAS 100LL, JET A-1, etc.)</li>
+        <li>Runway aids: ILS, PAPI, VASI, ALS, PCL (pilot-controlled lighting)</li>
+        <li>VFR/IFR operation badges, PPR and Private indicators</li>
+        <li>Surface condition and PCN (Pavement Classification Number)</li>
+        <li>Link to Lentopaikat.fi (Finnish airports)</li>
+      </ul>
+      External links: AIP, Google, SkyVector, OurAirports, Windy.
+    </td>
   </tr>
   <tr>
     <td><strong>TAF</strong></td>
@@ -293,8 +365,8 @@
     <td>24-hour vertical atmospheric profile (FL000&ndash;FL200). See <a href="#airgram-charts">Section 9</a>.</td>
   </tr>
   <tr>
-    <td><strong>Runways</strong></td>
-    <td>Runway table with designators, dimensions, surface type. When METAR is available, adds headwind/tailwind and crosswind components with best/worst runway indication.</td>
+    <td><strong>Briefing</strong></td>
+    <td>AI-generated weather briefing using live METAR, TAF, NOTAMs, and LLF data. Streams a natural-language summary covering significant weather, operational considerations, and flight category outlook.</td>
   </tr>
 </table>
 
@@ -341,7 +413,7 @@
 </ul>
 
 <h3>6.3 Runway Wind Analysis</h3>
-<p>When METAR data is available and the Runways tab is opened, the runway table is enhanced with wind component analysis for each runway end:</p>
+<p>When METAR data is available, the runway table in the Info tab is enhanced with wind component analysis for each runway end:</p>
 <ul>
   <li><strong>Head/Tail</strong>: headwind or tailwind component in knots</li>
   <li><strong>Xwind</strong>: crosswind component with direction (L/R) and gust crosswind if applicable</li>
@@ -489,7 +561,7 @@
 <ol>
   <li>Open the <strong>DA62 panel</strong> (aircraft icon, right side) and select the <strong>Route</strong> tab.</li>
   <li>Click <strong>Start Route</strong> to enter route mode.</li>
-  <li>Click airports on the map to add them as waypoints. You can also click on open map areas to add custom coordinate waypoints (these are reverse-geocoded to place names).</li>
+  <li>Click airports on the map to add them as waypoints. You can also click on open map areas to add custom coordinate waypoints (these are reverse-geocoded to place names). Clicking an R/D/P airspace area in route mode adds a waypoint at that location instead of showing the area details.</li>
 </ol>
 
 <h3>10.2 Route Settings</h3>
@@ -538,6 +610,16 @@
 
 <h3>10.7 Auto Route (IFR)</h3>
 <p>The <strong>Auto Route (IFR)</strong> button uses the Autorouter API to find an optimal IFR route between the first and last waypoints. It supports fuel and time optimization modes (toggles on repeated clicks) and populates the route with IFR waypoints (intersections, navaids).</p>
+
+<h3>10.8 Runway Visualization</h3>
+<p>At zoom level &ge; 11, runway diagrams are rendered on the map for departure and arrival airports. Each runway shows:</p>
+<ul>
+  <li>Grey runway body with white outline and dashed centerline</li>
+  <li>Runway designator labels at each end</li>
+  <li>Airport elevation label</li>
+  <li>Parallel runways are offset laterally to avoid overlap</li>
+  <li>Runways are drawn at 4&times; length scale for visibility</li>
+</ul>
 
 <!-- ═══════════════════════════════════════════════════ -->
 <h2 id="wind-adjusted" class="page-break">11. Wind-Adjusted Calculations</h2>
@@ -591,7 +673,7 @@
 <!-- ═══════════════════════════════════════════════════ -->
 <h2 id="route-weather" class="page-break">13. Route Weather Panel</h2>
 
-<p>Click the <strong>Weather</strong> button in route totals to open the floating Route Weather panel. It has three tabs:</p>
+<p>Click the <strong>Weather</strong> button in route totals to open the floating Route Weather panel. It has four tabs:</p>
 
 <h3>13.1 Airgram Tab</h3>
 <p>A cross-section airgram along the entire route (surface to FL200), similar to a GRAMET but computed from Open-Meteo pressure-level data. The X-axis represents distance along the route with waypoint labels, and the Y-axis shows altitude. Visual elements match the airport airgram (temperature colors, cloud shading, icing hatching, freezing level, wind barbs).</p>
@@ -601,6 +683,9 @@
 
 <h3>13.3 FL Compare Tab</h3>
 <p>Compares wind conditions (headwind/tailwind, ground speed, time, fuel) across multiple flight levels for the current route. Helps select the optimal FL considering wind efficiency.</p>
+
+<h3>13.4 Briefing Tab</h3>
+<p>AI-generated route weather briefing that synthesizes METAR, TAF, NOTAMs, and LLF data for all waypoints along the route into a natural-language summary. Covers departure, en-route, and arrival weather, highlighting significant conditions and operational considerations.</p>
 
 <!-- ═══════════════════════════════════════════════════ -->
 <h2 id="weight-balance" class="page-break">14. Weight &amp; Balance</h2>
@@ -673,12 +758,20 @@
 <p>Generates a standard <code>.gpx</code> file with waypoints (including elevations in meters) and a route track. Compatible with most GPS devices and mapping applications.</p>
 
 <h3>15.3 Print Flight Plan</h3>
-<p>The Print button generates a printable flight plan page with:</p>
+<p>The Print button generates a comprehensive printable flight plan page with:</p>
 <ul>
-  <li>Route summary with waypoints, legs (distance, heading, time, fuel)</li>
-  <li>Weather conditions at each waypoint</li>
-  <li>Fuel totals, reserve calculations, terrain warnings</li>
-  <li>Route map screenshot</li>
+  <li><strong>Route map</strong> &mdash; SVG rendering with the selected basemap tiles as background, route line with heading/distance labels on one side and time/fuel on the other, wind barbs, cloud cover symbols, and waypoint markers</li>
+  <li><strong>Runway diagrams</strong> &mdash; departure and arrival runways drawn on the map with designators and airport elevation</li>
+  <li><strong>R/D/P callout boxes</strong> &mdash; any active Restricted/Danger/Prohibited areas near the route are shown with leader lines and labels (name, type, vertical limits)</li>
+  <li><strong>Nav log table</strong> &mdash; waypoints with magnetic heading, distance, ETA, fuel, weather category, and NOTAM badges</li>
+  <li><strong>Weight &amp; Balance</strong> &mdash; W&amp;B summary with CG envelope chart</li>
+  <li><strong>Weather section</strong> &mdash; raw METAR and TAF text for all route airports</li>
+  <li><strong>LLF data</strong> &mdash; Low Level Forecast if available</li>
+  <li><strong>NOTAMs</strong> &mdash; full NOTAM text for all route airports</li>
+  <li><strong>Airgram</strong> &mdash; route vertical profile</li>
+  <li><strong>GRAMET</strong> &mdash; official weather cross-section image</li>
+  <li><strong>FL Compare</strong> &mdash; flight level wind comparison</li>
+  <li><strong>SWC</strong> &mdash; Significant Weather Chart image</li>
 </ul>
 
 <h3>15.4 Settings Save/Load</h3>
@@ -758,6 +851,7 @@
 <table>
   <tr><th>Data</th><th>Source</th><th>Cache</th><th>Notes</th></tr>
   <tr><td>Airport database</td><td>OurAirports (CSV &rarr; JSON pipeline)</td><td>Static file</td><td>Processed by <code>scripts/build-data.js</code></td></tr>
+  <tr><td>Airport enrichment</td><td>OpenAIP (via worker proxy)</td><td>Session</td><td>Frequencies, fuel, hours, runway aids, surface condition</td></tr>
   <tr><td>METAR</td><td>VATSIM METAR API (via worker proxy)</td><td>10 min</td><td>Batch fetch for map, single for popup</td></tr>
   <tr><td>TAF</td><td>aviationweather.gov TAF API (via worker proxy)</td><td>10 min</td><td>Hourly breakdown with TEMPO/BECMG handling</td></tr>
   <tr><td>NOTAMs</td><td>FAA NOTAM API (via worker proxy)</td><td>30 min</td><td>Auto-classified critical/normal</td></tr>
@@ -765,6 +859,18 @@
   <tr><td>Current weather</td><td>OpenWeatherMap One Call 3.0 (via proxy)</td><td>Per request</td><td>Temperature, wind, humidity, hourly forecast</td></tr>
   <tr><td>Weather overview</td><td>OpenWeatherMap Weather Overview</td><td>Per request</td><td>AI-generated text summary</td></tr>
   <tr><td>Weather tiles</td><td>OpenWeatherMap Tile API 1.0</td><td>Tile cache</td><td>Wind, clouds, precipitation, pressure, temperature</td></tr>
+  <tr><td>Satellite imagery</td><td>ilmailusaa.fi GeoServer (FMI / EUMETSAT)</td><td>Tile cache</td><td>HRV satellite, Europe-wide WMS</td></tr>
+  <tr><td>Radar</td><td>ilmailusaa.fi GeoServer (FMI)</td><td>Tile cache</td><td>Precipitation radar composite, Scandinavia WMS</td></tr>
+  <tr><td>Radar nowcast</td><td>ilmailusaa.fi GeoServer (FMI)</td><td>Tile cache</td><td>Deterministic precipitation forecast ~4h, Finland WMS</td></tr>
+  <tr><td>Lightning</td><td>ilmailusaa.fi GeoServer (FMI / EUMETSAT)</td><td>Tile cache</td><td>Flash count heatmap, 10-min updates, Europe WMS</td></tr>
+  <tr><td>CB/TCU</td><td>ilmailusaa.fi GeoServer (FMI)</td><td>Tile cache</td><td>CB/TCU detection, Finland WMS</td></tr>
+  <tr><td>Fog</td><td>ilmailusaa.fi GeoServer (FMI / EUMETSAT)</td><td>Tile cache</td><td>Fog detection (HRV day / IR night), Europe WMS</td></tr>
+  <tr><td>SIGMETs</td><td>OpenAIP SIGMET API (via worker proxy)</td><td>Per request</td><td>Active SIGMETs over Europe as GeoJSON polygons</td></tr>
+  <tr><td>LLF</td><td>ilmailusaa.fi LLF API</td><td>Per request</td><td>VIS/ceiling/icing/wind for 10 Nordic forecast areas</td></tr>
+  <tr><td>Airspace tiles</td><td>OpenAIP (via worker proxy)</td><td>Tile cache</td><td>Controlled airspace, CTR, TMA tile overlay</td></tr>
+  <tr><td>R/D/P Areas</td><td>OpenAIP (via worker proxy)</td><td>Per request</td><td>Restricted/Danger/Prohibited GeoJSON with NOTAM activation</td></tr>
+  <tr><td>Navaids</td><td>OpenAIP (via worker proxy)</td><td>Per request</td><td>VOR, NDB, DME at zoom &ge; 7</td></tr>
+  <tr><td>Reporting Points</td><td>OpenAIP (via worker proxy)</td><td>Per request</td><td>VFR reporting points at zoom &ge; 7</td></tr>
   <tr><td>Wind grid (surface)</td><td>OpenWeatherMap (via batch proxy)</td><td>Per request</td><td>Grid points for wind barb overlay</td></tr>
   <tr><td>Pressure-level forecast</td><td>Open-Meteo Forecast API</td><td>Per request</td><td>8 pressure levels, 24h, used for airgrams and wind calc</td></tr>
   <tr><td>AMA data</td><td>Custom grid file (<code>ama-grid.json</code>)</td><td>Static file</td><td>1&deg;&times;1&deg; cells with AMA in feet</td></tr>
@@ -773,7 +879,9 @@
   <tr><td>Route weather (en-route)</td><td>OpenWeatherMap Weather API (via batch proxy)</td><td>10 min</td><td>6 sample points along route</td></tr>
   <tr><td>GRAMET</td><td>Autorouter GRAMET API</td><td>Per request</td><td>Weather cross-section image</td></tr>
   <tr><td>IFR Auto Route</td><td>Autorouter Route API</td><td>Per request</td><td>Optimal IFR routing with SID/STAR</td></tr>
-  <tr><td>SWC</td><td>ilmailusaa.fi (Finnish Aviation Weather)</td><td>Session</td><td>Scandinavia SWC image + PDF link</td></tr>
+  <tr><td>SWC (Finland)</td><td>ilmailusaa.fi</td><td>Session</td><td>Scandinavia SWC image + PDF link</td></tr>
+  <tr><td>SWC (Nordic)</td><td>MET Norway (api.met.no)</td><td>Session</td><td>Nordic sigchart image</td></tr>
+  <tr><td>SWC (Europe)</td><td>WAFC London (via worker proxy)</td><td>Session</td><td>EUR SIGWX chart, nearest 6h UTC slot</td></tr>
 </table>
 
 <div class="info-box">
