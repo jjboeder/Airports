@@ -967,6 +967,13 @@ html, body {
   line-height: 1.5;
 }
 
+.wx-place-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 4px;
+}
+
 .wx-header {
   display: flex;
   align-items: center;

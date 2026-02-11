@@ -1877,12 +1877,20 @@
 
     Promise.all([
       fetch(OWM_PROXY + '/onecall?lat=' + lat + '&lon=' + lon).then(function (r) { return r.json(); }),
-      fetch(OWM_PROXY + '/wx-overview?lat=' + lat + '&lon=' + lon).then(function (r) { return r.json(); })
+      fetch(OWM_PROXY + '/wx-overview?lat=' + lat + '&lon=' + lon).then(function (r) { return r.json(); }),
+      fetch(OWM_PROXY + '/weather?lat=' + lat + '&lon=' + lon).then(function (r) { return r.json(); }).catch(function () { return null; })
     ]).then(function (results) {
       var oneCall = results[0];
       var overview = results[1];
+      var place = results[2];
       if (!oneCall.current) { el.innerHTML = '<span class="info-unknown">Weather unavailable</span>'; return; }
-      var html = buildOneCallHtml(oneCall, ama);
+      var html = '';
+      var placeName = place && place.name ? place.name : null;
+      var country = place && place.sys && place.sys.country ? place.sys.country : null;
+      if (placeName) {
+        html += '<div class="wx-place-name">' + placeName + (country ? ', ' + country : '') + '</div>';
+      }
+      html += buildOneCallHtml(oneCall, ama);
       if (overview && overview.weather_overview) {
         var text = overview.weather_overview.replace(/(\d+(?:\.\d+)?)\s*meter(?:s)?(?:\s*per\s*second|\/s(?:ec)?)/gi, function (m, v) {
           return Math.round(parseFloat(v) * 1.944) + ' knots';
