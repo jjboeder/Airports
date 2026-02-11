@@ -499,6 +499,8 @@ Guidelines:
 - Flag: icing risk, strong winds (>15kt) or gusts (>20kt), crosswind components, low visibility (<5km), thunderstorms, turbulence
 - Note runway suitability concerns if runway data is available
 - When FL compare data is provided, identify the optimal flight level for time/fuel and compare against the selected FL. Note headwind/tailwind differences. Recommend an FL if a significantly better option exists (>5 min or >2 gal savings)
+- When LLF (Low Level Forecast) data is provided, use it for en-route VIS/ceiling/icing/freezing level analysis — this is official Nordic aviation forecast data and is more authoritative than surface samples
+- When upper-level pressure data is provided, use it for wind and temperature at altitude along the route
 - Keep concise: 200-350 words
 - If insufficient data is provided, state what's missing and brief on what you can`;
 
@@ -528,6 +530,34 @@ NOTAMs: ${d.notams && d.notams.length > 0 ? d.notams.map(n => n.id + ': ' + n.te
             ? d.flCompare.map(f => `FL${f.fl < 100 ? '0' : ''}${f.fl}: ${f.timeH}h, ${f.fuelGal}gal, avg HW ${f.hwKt > 0 ? '+' : ''}${f.hwKt}kt`).join('\n')
             : 'Not available';
 
+          // LLF (Low Level Forecast) data for Nordic areas
+          let llfStr = 'Not available';
+          if (d.llf && d.llf.areas && Object.keys(d.llf.areas).length > 0) {
+            const llfParts = [`Valid: ${d.llf.title || ''} (${d.llf.validFrom || ''} to ${d.llf.validTo || ''})`];
+            for (const [area, info] of Object.entries(d.llf.areas)) {
+              let s = `${area.toUpperCase()}: VIS ${info.visibility_m != null ? info.visibility_m + 'm' : '?'}, Ceiling ${info.ceiling_ft != null ? info.ceiling_ft + 'ft' : '?'}`;
+              if (info.weather && info.weather.length) s += ', WX: ' + info.weather.join(', ');
+              if (info.freezingLevel) {
+                const fl = info.freezingLevel;
+                s += `, 0°C: ${fl.from === 0 && fl.to === 0 ? 'SFC' : (fl.from || '?') + '-' + (fl.to || '?') + ' ft'}`;
+              }
+              if (info.icing && info.icing.length) {
+                s += ', ICE: ' + info.icing.map(i => `${i.intensity} ${i.altitude}`).join(', ');
+              }
+              if (info.overview) s += '\n  Overview: ' + info.overview;
+              llfParts.push(s);
+            }
+            llfStr = llfParts.join('\n');
+          }
+
+          // Airgram summary (pressure-level averages along route)
+          let airgramStr = 'Not available';
+          if (d.airgramSummary && d.airgramSummary.length > 0) {
+            airgramStr = d.airgramSummary.map(l =>
+              `${l.altFt}ft (${l.level}hPa): wind ${l.windDir}°/${l.windSpd}kt, temp ${l.temp}°C, cloud ${l.cloud}%`
+            ).join('\n');
+          }
+
           userContent = `Generate a route weather briefing.
 
 Flight Level: FL${d.flightLevel || '?'}
@@ -543,6 +573,12 @@ NOTAMs: ${d.departure && d.departure.notams && d.departure.notams.length > 0 ? d
 
 En-Route Weather Samples (surface):
 ${enrouteWx || 'Not available'}
+
+Low Level Forecast (LLF — Nordic areas, aviation forecast for VIS/ceiling/icing):
+${llfStr}
+
+Upper-Level Conditions (pressure-level averages along route):
+${airgramStr}
 
 FL Compare (time/fuel/headwind for FL10-FL200, selected FL${d.flightLevel || '?'}):
 ${flCompStr}
