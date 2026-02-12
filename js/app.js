@@ -860,13 +860,24 @@
         html += '</span></div>';
       }
 
-      // Present weather
+      // Present weather — with decoded tooltips
       if (pw) {
-        var wxItems = [];
-        if (pw.general) wxItems.push(pw.general);
-        if (pw.local && pw.local !== pw.general) wxItems.push('local ' + pw.local);
-        if (wxItems.length) {
-          html += '<div class="llf-wx">WX: ' + wxItems.join(', ') + '</div>';
+        var decode = window.AirportApp && window.AirportApp.decodeWxString;
+        var wxParts = [];
+        if (pw.general) {
+          var gRaw = Array.isArray(pw.general) ? pw.general.join(' ') : pw.general;
+          var gTitle = decode ? decode(gRaw) : gRaw;
+          wxParts.push('<span title="' + gTitle + '">' + gRaw + '</span>');
+        }
+        if (pw.local) {
+          var lRaw = Array.isArray(pw.local) ? pw.local.join(' ') : pw.local;
+          if (lRaw !== (Array.isArray(pw.general) ? pw.general.join(' ') : pw.general)) {
+            var lTitle = decode ? decode(lRaw) : lRaw;
+            wxParts.push('local <span title="' + lTitle + '">' + lRaw + '</span>');
+          }
+        }
+        if (wxParts.length) {
+          html += '<div class="llf-wx">WX: ' + wxParts.join(', ') + '</div>';
         }
       }
 

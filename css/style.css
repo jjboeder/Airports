@@ -497,6 +497,20 @@ html, body {
   padding: 1px 2px !important;
 }
 
+.taf-tempo-val {
+  color: #e67e22;
+  font-size: 9px;
+}
+
+.taf-td-wx {
+  font-size: 8px;
+  color: #888;
+  max-width: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .taf-raw {
   font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
   font-size: 11px;

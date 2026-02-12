@@ -1240,6 +1240,43 @@
     return false;
   }
 
+  // Decode a single wx group (e.g. "+TSRA", "BCFG", "-FZDZ") to readable text
+  var WX_DESC = {
+    MI:'Shallow',BC:'Patches',PR:'Partial',DR:'Low Drifting',BL:'Blowing',
+    SH:'Showers',TS:'Thunderstorm',FZ:'Freezing',
+    DZ:'Drizzle',RA:'Rain',SN:'Snow',SG:'Snow Grains',IC:'Ice Crystals',
+    PL:'Ice Pellets',GR:'Hail',GS:'Small Hail',UP:'Unknown Precip',
+    BR:'Mist',FG:'Fog',FU:'Smoke',VA:'Volcanic Ash',DU:'Dust',
+    SA:'Sand',HZ:'Haze',PO:'Dust Whirls',SQ:'Squall',
+    FC:'Funnel Cloud',SS:'Sandstorm',DS:'Duststorm'
+  };
+  function decodeWxGroup(code) {
+    if (!code) return '';
+    var intensity = '';
+    var s = code;
+    if (s.charAt(0) === '+') { intensity = 'Heavy '; s = s.substring(1); }
+    else if (s.charAt(0) === '-') { intensity = 'Light '; s = s.substring(1); }
+    else if (s.substring(0, 2) === 'VC') { intensity = 'Vicinity '; s = s.substring(2); }
+    var parts = [];
+    while (s.length >= 2) {
+      var token = s.substring(0, 2);
+      if (WX_DESC[token]) { parts.push(WX_DESC[token]); s = s.substring(2); }
+      else break;
+    }
+    if (parts.length === 0) return code;
+    return intensity + parts.join(' ');
+  }
+  function decodeWxString(wxStr) {
+    if (!wxStr) return '';
+    if (Array.isArray(wxStr)) return wxStr.map(decodeWxGroup).join(', ');
+    var groups = wxStr.split(/\s+/);
+    var decoded = [];
+    for (var i = 0; i < groups.length; i++) {
+      decoded.push(decodeWxGroup(groups[i]));
+    }
+    return decoded.join(', ');
+  }
+
   function computeHourlyCategories(tafJson) {
     if (!tafJson || !tafJson.length || !tafJson[0].fcsts || tafJson[0].fcsts.length === 0) return null;
 
@@ -1344,13 +1381,18 @@
         if (f.wxString) wxStr = wxStr ? wxStr + ' ' + f.wxString : f.wxString;
       }
 
-      // Compute worst-case TEMPO category across all TEMPO/PROB overlays (unfiltered)
-      // This is for display purposes — shows pilots what TEMPOs forecast even if AMC1 rules filter them
+      // Compute worst-case TEMPO category/ceiling/vis across all TEMPO/PROB overlays (unfiltered)
+      // Also collect all weather strings from active overlays and base forecast
       var tempoCat = null;
+      var tempoCeiling = null;
+      var tempoVisM = null;
+      var allWx = [];
+      if (wxStr) allWx.push(wxStr);
       for (var i = 0; i < fcsts.length; i++) {
         var f = fcsts[i];
         if (f.fcstChange !== 'TEMPO' && f.fcstChange !== 'PROB') continue;
         if (f.timeFrom > epoch || (f.timeTo && f.timeTo <= epoch)) continue;
+        if (f.wxString) allWx.push(f.wxString);
         var tVisM = parseTafVisib(f.visib);
         if (tVisM === null) tVisM = visM;
         var tCeiling = tafCeiling(f.clouds);
@@ -1359,11 +1401,22 @@
         if (catOrder.indexOf(tCat) > catOrder.indexOf(cat)) {
           if (!tempoCat || catOrder.indexOf(tCat) > catOrder.indexOf(tempoCat)) {
             tempoCat = tCat;
+            tempoCeiling = tCeiling;
+            tempoVisM = tVisM;
           }
         }
       }
+      // Deduplicate and join all weather phenomena
+      var wxPhenomena = [];
+      for (var i = 0; i < allWx.length; i++) {
+        var parts = allWx[i].split(/\s+/);
+        for (var j = 0; j < parts.length; j++) {
+          if (parts[j] && parts[j] !== 'NSW' && wxPhenomena.indexOf(parts[j]) < 0) wxPhenomena.push(parts[j]);
+        }
+      }
+      var combinedWx = wxPhenomena.join(' ');
 
-      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wspd: wspd, wgst: wgst, wxStr: wxStr, tempoCat: tempoCat });
+      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wspd: wspd, wgst: wgst, wxStr: combinedWx, tempoCat: tempoCat, tempoCeiling: tempoCeiling, tempoVisM: tempoVisM });
     }
 
     return hours;
@@ -1433,20 +1486,45 @@
       }
       html += '</tr>';
     }
-    // Ceiling row
+    // Ceiling row — show "base/tempo" when TEMPO ceiling differs
     html += '<tr class="taf-row-data"><td class="taf-row-label">CIG</td>';
     for (var i = 0; i < hours.length; i++) {
-      if (!hours[i].cat) continue;
-      html += '<td class="taf-td-data">' + formatCeiling(hours[i].ceiling) + '</td>';
+      var h = hours[i];
+      if (!h.cat) continue;
+      var cigStr = formatCeiling(h.ceiling);
+      if (h.tempoCat && h.tempoCeiling !== h.ceiling) {
+        cigStr += '<span class="taf-tempo-val">/' + formatCeiling(h.tempoCeiling) + '</span>';
+      }
+      html += '<td class="taf-td-data">' + cigStr + '</td>';
     }
     html += '</tr>';
-    // Visibility row
+    // Visibility row — show "base/tempo" when TEMPO visibility differs
     html += '<tr class="taf-row-data"><td class="taf-row-label">VIS</td>';
     for (var i = 0; i < hours.length; i++) {
-      if (!hours[i].cat) continue;
-      html += '<td class="taf-td-data">' + formatVisKm(hours[i].visM) + '</td>';
+      var h = hours[i];
+      if (!h.cat) continue;
+      var visStr = formatVisKm(h.visM);
+      if (h.tempoCat && h.tempoVisM !== h.visM) {
+        visStr += '<span class="taf-tempo-val">/' + formatVisKm(h.tempoVisM) + '</span>';
+      }
+      html += '<td class="taf-td-data">' + visStr + '</td>';
     }
     html += '</tr>';
+    // Weather phenomena row
+    var hasAnyWx = hours.some(function (h) { return h.cat && h.wxStr; });
+    if (hasAnyWx) {
+      html += '<tr class="taf-row-data"><td class="taf-row-label">WX</td>';
+      for (var i = 0; i < hours.length; i++) {
+        var h = hours[i];
+        if (!h.cat) continue;
+        if (h.wxStr) {
+          html += '<td class="taf-td-data taf-td-wx" title="' + escapeHtml(decodeWxString(h.wxStr)) + '">' + escapeHtml(h.wxStr) + '</td>';
+        } else {
+          html += '<td class="taf-td-data"></td>';
+        }
+      }
+      html += '</tr>';
+    }
     // Wind row
     var hasAnyWind = hours.some(function (h) { return h.cat && isStrongWind(h.wspd, h.wgst); });
     if (hasAnyWind) {
@@ -2107,6 +2185,7 @@
   window.AirportApp.parseTafVisib = parseTafVisib;
   window.AirportApp.tafCeiling = tafCeiling;
   window.AirportApp.isPersistentWx = isPersistentWx;
+  window.AirportApp.decodeWxString = decodeWxString;
   window.AirportApp.metarCache = metarCache;
   window.AirportApp.metarCacheTime = metarCacheTime;
   window.AirportApp.tafCacheTime = tafCacheTime;
