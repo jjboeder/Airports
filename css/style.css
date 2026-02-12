@@ -809,6 +809,18 @@ html, body {
   font-weight: 700;
 }
 
+/* Push top controls below status bar / notch on mobile */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .leaflet-top {
+    top: env(safe-area-inset-top) !important;
+  }
+}
+@media (max-width: 768px) {
+  .leaflet-top {
+    top: max(12px, env(safe-area-inset-top, 12px)) !important;
+  }
+}
+
 /* Layer control styling */
 .leaflet-control-layers {
   border-radius: 8px !important;
