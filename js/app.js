@@ -949,7 +949,20 @@
   var AIRSPACE_TYPES = {
     1: { label: 'Restricted', color: '#e74c3c', shortLabel: 'R' },
     2: { label: 'Danger', color: '#e67e22', shortLabel: 'D' },
-    3: { label: 'Prohibited', color: '#8b0000', shortLabel: 'P' }
+    3: { label: 'Prohibited', color: '#8b0000', shortLabel: 'P' },
+    4: { label: 'CTR', color: '#2980b9', shortLabel: 'CTR' },
+    5: { label: 'Class A', color: '#1a5276', shortLabel: 'A' },
+    6: { label: 'Class B', color: '#2471a3', shortLabel: 'B' },
+    7: { label: 'TMA', color: '#8e44ad', shortLabel: 'TMA' },
+    8: { label: 'Class D', color: '#2980b9', shortLabel: 'D' },
+    9: { label: 'Class E', color: '#5dade2', shortLabel: 'E' },
+    10: { label: 'Class F', color: '#76d7c4', shortLabel: 'F' },
+    13: { label: 'ATZ', color: '#3498db', shortLabel: 'ATZ' },
+    26: { label: 'CTA', color: '#2c3e50', shortLabel: 'CTA' },
+    27: { label: 'ACC Sector', color: '#c0392b', shortLabel: 'ACC' },
+    28: { label: 'RMZ', color: '#27ae60', shortLabel: 'RMZ' },
+    29: { label: 'TMZ', color: '#f39c12', shortLabel: 'TMZ' },
+    33: { label: 'FIS Sector', color: '#16a085', shortLabel: 'FIS' }
   };
 
   var DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1080,10 +1093,13 @@
     var notam = item._activatingNotam;
     var activation = classifyAirspaceActivation(item);
     if (notam) activation = 'active';
-    if (activation === 'active') {
-      html += ' <span class="airspace-status-badge airspace-status-active">ACTIVE</span>';
-    } else {
-      html += ' <span class="airspace-status-badge airspace-status-potential">POTENTIALLY ACTIVE</span>';
+    // Only show activation status for R/D/P areas (types 1,2,3)
+    if (item.type >= 1 && item.type <= 3) {
+      if (activation === 'active') {
+        html += ' <span class="airspace-status-badge airspace-status-active">ACTIVE</span>';
+      } else {
+        html += ' <span class="airspace-status-badge airspace-status-potential">POTENTIALLY ACTIVE</span>';
+      }
     }
     if (item.byNotam) {
       html += ' <span class="airspace-bynotam-badge">BY NOTAM</span>';
@@ -1285,6 +1301,13 @@
           }
         });
 
+        var lower = formatAirspaceLimit(item.lowerLimit);
+        var upper = formatAirspaceLimit(item.upperLimit);
+        var tip = (item.name || '') + ' (' + typeInfo.label + ')';
+        tip += '\n' + lower + ' – ' + upper;
+        if (activation === 'active') tip += '\nACTIVE';
+        polygon.bindTooltip(tip, { sticky: true, direction: 'top' });
+
         polygon.on('click', function (e) {
           if (window.AirportApp && window.AirportApp.routeMode) {
             if (window.AirportApp.addMapWaypoint) {
@@ -1366,6 +1389,259 @@
         loadAirspaces();
       }
     });
+  }
+
+  // --- CTR/TMA overlay (OpenAIP types 4=CTR, 7=TMA, 26=CTA) ---
+
+  function setupCtrTmaLayer(layerGroup) {
+    var loadedIds = {};
+    var debounceTimer = null;
+    var MIN_ZOOM = 7;
+
+    // Approximate polygon area (shoelace formula) for sorting
+    function polyArea(coords) {
+      var ring = coords[0];
+      if (!ring || ring.length < 3) return 0;
+      var a = 0;
+      for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+      }
+      return Math.abs(a / 2);
+    }
+
+    function renderItems(items) {
+      // Sort largest first so smaller (inner) areas render on top
+      items.sort(function (a, b) {
+        var aArea = a.geometry ? polyArea(a.geometry.coordinates) : 0;
+        var bArea = b.geometry ? polyArea(b.geometry.coordinates) : 0;
+        return bArea - aArea;
+      });
+      items.forEach(function (item) {
+        var id = item._id || item.id;
+        if (loadedIds[id]) return;
+        loadedIds[id] = true;
+        if (!item.geometry) return;
+
+        // If airspace has no frequencies, try to get them from airport data
+        if ((!item.frequencies || item.frequencies.length === 0) && item.name) {
+          var icaoMatch = item.name.match(/^([A-Z]{4})\b/);
+          if (icaoMatch) {
+            var app = window.AirportApp;
+            var marker = app && app.markersByIcao && app.markersByIcao[icaoMatch[1]];
+            var row = marker && marker._airportData;
+            if (row && row[12] && row[12].length > 0) {
+              item.frequencies = row[12].map(function (f) {
+                return { name: f[0], value: f[1] };
+              });
+            }
+          }
+        }
+
+        var typeInfo = AIRSPACE_TYPES[item.type] || { label: 'Airspace', color: '#888' };
+
+        var polygon = L.geoJSON(item.geometry, {
+          pane: 'ctrTmaPane',
+          style: {
+            color: typeInfo.color,
+            weight: 1.5,
+            opacity: 0.7,
+            fillColor: typeInfo.color,
+            fillOpacity: 0.08,
+            bubblingMouseEvents: false
+          }
+        });
+
+        // Tooltip with name, limits, and frequency
+        var lower = formatAirspaceLimit(item.lowerLimit);
+        var upper = formatAirspaceLimit(item.upperLimit);
+        var tip = (item.name || '') + ' (' + typeInfo.label + ')';
+        tip += '\n' + lower + ' – ' + upper;
+        if (item.frequencies && item.frequencies.length > 0) {
+          tip += '\n' + item.frequencies.map(function (f) { return f.value; }).join(', ');
+        }
+        polygon.bindTooltip(tip, { sticky: true, direction: 'top' });
+
+        polygon.on('click', function (e) {
+          if (window.AirportApp && window.AirportApp.routeMode) {
+            if (window.AirportApp.addMapWaypoint) {
+              window.AirportApp.addMapWaypoint(e.latlng);
+            }
+            return;
+          }
+          polygon.unbindPopup();
+          polygon.bindPopup(airspacePopupHtml(item), {
+            maxWidth: 420, minWidth: 280, className: 'airspace-popup-wrapper'
+          }).openPopup(e.latlng);
+        });
+
+        polygon.addTo(layerGroup);
+      });
+    }
+
+    function loadCtrTma() {
+      if (map.getZoom() < MIN_ZOOM) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+        return;
+      }
+
+      var bounds = map.getBounds();
+      var bbox = [
+        bounds.getWest().toFixed(4),
+        bounds.getSouth().toFixed(4),
+        bounds.getEast().toFixed(4),
+        bounds.getNorth().toFixed(4)
+      ].join(',');
+
+      fetch(OWM_PROXY + '/airspaces?bbox=' + bbox + '&type=4,7,13,26,28,29')
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          if (data && data.items) renderItems(data.items);
+        })
+        .catch(function (err) {
+          console.error('CTR/TMA load error:', err);
+        });
+    }
+
+    map.on('moveend', function () {
+      if (!map.hasLayer(layerGroup)) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadCtrTma, 500);
+    });
+
+    map.on('overlayremove', function (e) {
+      if (e.layer === layerGroup) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+      }
+    });
+
+    map.on('overlayadd', function (e) {
+      if (e.layer === layerGroup) loadCtrTma();
+    });
+
+    if (map.hasLayer(layerGroup)) loadCtrTma();
+  }
+
+  // --- Generic OpenAIP airspace layer (for ACC Sector, FIS Sector, etc.) ---
+
+  function setupOpenAipAirspaceLayer(layerGroup, typeCodes, label) {
+    var loadedIds = {};
+    var debounceTimer = null;
+    var MIN_ZOOM = 5;
+
+    function renderItems(items) {
+      items.sort(function (a, b) {
+        var aA = a.geometry ? polyAreaGlobal(a.geometry.coordinates) : 0;
+        var bA = b.geometry ? polyAreaGlobal(b.geometry.coordinates) : 0;
+        return bA - aA;
+      });
+      items.forEach(function (item) {
+        var id = item._id || item.id;
+        if (loadedIds[id]) return;
+        loadedIds[id] = true;
+        if (!item.geometry) return;
+
+        var typeInfo = AIRSPACE_TYPES[item.type] || { label: label, color: '#888' };
+
+        var polygon = L.geoJSON(item.geometry, {
+          style: {
+            color: typeInfo.color,
+            weight: 1.5,
+            opacity: 0.7,
+            fillColor: typeInfo.color,
+            fillOpacity: 0.06,
+            dashArray: '6,4',
+            bubblingMouseEvents: false
+          }
+        });
+
+        var lower = formatAirspaceLimit(item.lowerLimit);
+        var upper = formatAirspaceLimit(item.upperLimit);
+        var tip = (item.name || '') + ' (' + typeInfo.label + ')';
+        tip += '\n' + lower + ' – ' + upper;
+        if (item.frequencies && item.frequencies.length > 0) {
+          tip += '\n' + item.frequencies.map(function (f) { return f.value; }).join(', ');
+        }
+        polygon.bindTooltip(tip, { sticky: true, direction: 'top' });
+
+        polygon.on('click', function (e) {
+          if (window.AirportApp && window.AirportApp.routeMode) {
+            if (window.AirportApp.addMapWaypoint) {
+              window.AirportApp.addMapWaypoint(e.latlng);
+            }
+            return;
+          }
+          polygon.unbindPopup();
+          polygon.bindPopup(airspacePopupHtml(item), {
+            maxWidth: 420, minWidth: 280, className: 'airspace-popup-wrapper'
+          }).openPopup(e.latlng);
+        });
+
+        polygon.addTo(layerGroup);
+      });
+    }
+
+    function load() {
+      if (map.getZoom() < MIN_ZOOM) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+        return;
+      }
+
+      var bounds = map.getBounds();
+      var bbox = [
+        bounds.getWest().toFixed(4),
+        bounds.getSouth().toFixed(4),
+        bounds.getEast().toFixed(4),
+        bounds.getNorth().toFixed(4)
+      ].join(',');
+
+      fetch(OWM_PROXY + '/airspaces?bbox=' + bbox + '&type=' + typeCodes)
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          if (data && data.items) renderItems(data.items);
+        })
+        .catch(function (err) {
+          console.error(label + ' load error:', err);
+        });
+    }
+
+    map.on('moveend', function () {
+      if (!map.hasLayer(layerGroup)) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(load, 500);
+    });
+
+    map.on('overlayremove', function (e) {
+      if (e.layer === layerGroup) {
+        layerGroup.clearLayers();
+        loadedIds = {};
+      }
+    });
+
+    map.on('overlayadd', function (e) {
+      if (e.layer === layerGroup) load();
+    });
+
+    if (map.hasLayer(layerGroup)) load();
+  }
+
+  // polyArea is already defined inside setupCtrTmaLayer; re-define at module scope
+  function polyAreaGlobal(coords) {
+    var ring = coords[0];
+    if (!ring || ring.length < 3) return 0;
+    var a = 0;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    }
+    return Math.abs(a / 2);
   }
 
   // --- Navaids + VFR Reporting Points overlay (OpenAIP) ---
@@ -1570,6 +1846,120 @@
     }
   }
 
+  // --- Finnish Airspace overlay (flyk.com / EUROCONTROL EAD) ---
+
+  var AIRSPACE_CLASS_STYLE = {
+    'C':          { color: '#2980b9', fillOpacity: 0.08, weight: 1.5 },
+    'D':          { color: '#3498db', fillOpacity: 0.08, weight: 1.5 },
+    'G':          { color: '#27ae60', fillOpacity: 0.05, weight: 1 },
+    'RMZ':        { color: '#2980b9', fillOpacity: 0.05, weight: 1, dashArray: '4,4' },
+    'ADIZ':       { color: '#8e44ad', fillOpacity: 0.05, weight: 1, dashArray: '6,4' },
+    'RAS':        { color: '#e67e22', fillOpacity: 0.05, weight: 1, dashArray: '4,4' },
+    'Other':      { color: '#7f8c8d', fillOpacity: 0.05, weight: 1 }
+  };
+
+  // Skip Danger/Restricted/Prohibited — already shown by R/D/P Areas layer
+  var AIRSPACE_SKIP = { 'Danger': 1, 'Restricted': 1, 'Prohibited': 1 };
+
+  function setupFlykAirspaceLayer(layerGroup) {
+    var loaded = false;
+
+    function load() {
+      if (loaded) return;
+      loaded = true;
+      fetch('https://flyk.com/api/airspaces.geojson')
+        .then(function (r) { return r.json(); })
+        .then(function (geojson) {
+          L.geoJSON(geojson, {
+            filter: function (feature) {
+              return !AIRSPACE_SKIP[feature.properties.airspaceclass];
+            },
+            style: function (feature) {
+              var cls = feature.properties.airspaceclass || 'Other';
+              var s = AIRSPACE_CLASS_STYLE[cls] || AIRSPACE_CLASS_STYLE['Other'];
+              return {
+                color: s.color,
+                weight: s.weight || 1,
+                fillColor: s.color,
+                fillOpacity: s.fillOpacity || 0.05,
+                dashArray: s.dashArray || null
+              };
+            },
+            onEachFeature: function (feature, layer) {
+              var p = feature.properties;
+              var cls = p.airspaceclass || '';
+              var parts = [p.name || ''];
+              if (p.lower && p.upper) parts.push(p.lower + ' – ' + p.upper);
+              else if (p.upper) parts.push('up to ' + p.upper);
+              if (p.freq) parts.push(p.freq + ' MHz');
+              layer.bindTooltip(parts.join('\n'), {
+                sticky: true, direction: 'top'
+              });
+              layer.bindPopup(
+                '<b>' + (p.name || '') + '</b>' +
+                (cls ? '<br>Class: ' + cls : '') +
+                (p.lower ? '<br>Lower: ' + p.lower : '') +
+                (p.upper ? '<br>Upper: ' + p.upper : '') +
+                (p.freq ? '<br>Freq: ' + p.freq + ' MHz' : '') +
+                (p.callsign ? '<br>Callsign: ' + p.callsign : '') +
+                (p.activity ? '<br>Activity: ' + p.activity : '') +
+                (p.rmk ? '<br><i>' + p.rmk + '</i>' : ''),
+                { maxWidth: 350 }
+              );
+            }
+          }).addTo(layerGroup);
+        })
+        .catch(function (err) { console.error('Flyk airspace error:', err); });
+    }
+
+    map.on('overlayadd', function (e) { if (e.layer === layerGroup) load(); });
+    if (map.hasLayer(layerGroup)) load();
+  }
+
+  // --- IFR Points overlay (flyk.com) ---
+
+  function setupIfrPointsLayer(layerGroup) {
+    var loaded = false;
+    var MIN_ZOOM = 7;
+
+    function load() {
+      if (loaded) return;
+      if (map.getZoom() < MIN_ZOOM) return;
+      loaded = true;
+      fetch('https://flyk.com/api/ifr-points.geojson')
+        .then(function (r) { return r.json(); })
+        .then(function (geojson) {
+          L.geoJSON(geojson, {
+            pointToLayer: function (feature, latlng) {
+              var name = feature.properties.name || '';
+              var marker = L.marker(latlng, {
+                icon: L.divIcon({
+                  className: 'ifr-point-marker',
+                  html: '<div class="ifr-point-icon"></div>' +
+                        '<span class="ifr-point-label">' + name + '</span>',
+                  iconSize: [60, 14],
+                  iconAnchor: [5, 7]
+                })
+              });
+              marker._waypointData = { code: name, name: name };
+              marker.bindPopup('<b>' + name + '</b><br>IFR Waypoint');
+              return marker;
+            },
+            onEachFeature: function (feature, layer) {
+              layer.bindTooltip(feature.properties.name || '', { direction: 'top', offset: [0, -6] });
+            }
+          }).addTo(layerGroup);
+        })
+        .catch(function (err) { console.error('IFR points error:', err); });
+    }
+
+    map.on('overlayadd', function (e) { if (e.layer === layerGroup) load(); });
+    map.on('zoomend', function () {
+      if (map.hasLayer(layerGroup) && !loaded && map.getZoom() >= MIN_ZOOM) load();
+    });
+    if (map.hasLayer(layerGroup)) load();
+  }
+
   function setupLayerControl() {
     const overlays = {};
 
@@ -1600,15 +1990,29 @@
     var llfLayer = L.layerGroup();
     setupLlfLayer(llfLayer);
 
-    // OpenAIP airspace tile overlay
+    // CTR/TMA pane renders above R/D/P so hover/popups work on inner areas
+    map.createPane('ctrTmaPane');
+    map.getPane('ctrTmaPane').style.zIndex = 450;
+
+    // Airspaces tile overlay (OpenAIP)
     var airspaceTileLayer = L.tileLayer(OWM_PROXY + '/airspace-tiles/{z}/{x}/{y}.png', {
       opacity: 1,
       maxZoom: 14,
       attribution: '&copy; <a href="https://www.openaip.net">OpenAIP</a>'
     });
-    overlays['Airspace'] = airspaceTileLayer;
+    overlays['Airspaces'] = airspaceTileLayer;
 
-    // R/D/P interactive polygon overlay
+    // CTR/TMA vector overlay (types 4,7,26,28,29)
+    var ctrTmaLayer = L.layerGroup();
+    overlays['CTR/TMA'] = ctrTmaLayer;
+    setupCtrTmaLayer(ctrTmaLayer);
+
+    // Class A/B/D/E/F vector overlay (types 5,6,8,9,10)
+    var classAbdefLayer = L.layerGroup();
+    overlays['Class A/B/D/E/F'] = classAbdefLayer;
+    setupOpenAipAirspaceLayer(classAbdefLayer, '5,6,8,9,10', 'Airspace Class');
+
+    // R/D/P Areas overlay
     var airspaceVectorLayer = L.layerGroup();
     overlays['R/D/P Areas'] = airspaceVectorLayer;
     setupAirspaceLayer(airspaceVectorLayer);
@@ -1617,6 +2021,15 @@
     var waypointsLayer = L.layerGroup();
     overlays['Reporting Points'] = waypointsLayer;
     setupWaypointsLayer(waypointsLayer);
+
+    // Finnish ACC Sectors overlay (from AIP Finland ENR 6.1-5, 26 JAN 2023)
+    var accLayer = L.layerGroup();
+    overlays['ACC Sectors'] = accLayer;
+
+    // IFR Points overlay (flyk.com)
+    var ifrPointsLayer = L.layerGroup();
+    overlays['IFR Points'] = ifrPointsLayer;
+    setupIfrPointsLayer(ifrPointsLayer);
 
     // Airport layers will be added by airports.js via window.AirportApp
     window.AirportApp = window.AirportApp || {};
@@ -1683,6 +2096,21 @@
     map.on('overlayremove', function (e) {
       if (e.name === 'Radar+4h') nowcastLayer.clearLayers();
     });
+
+    // ACC sectors from flyk.com GeoJSON (sourced from EUROCONTROL EAD / Finnish AIP)
+    var accGeoJson = {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[24.78222,60.82028],[25.48583,60.83083],[25.63444,60.77333],[25.84167,60.69222],[26.13333,60.45222],[26.51528,60.33778],[27.62806,60.33167],[27.45667,60.22333],[27.29306,60.20028],[26.55,60.13333],[25.86667,59.88333],[25.33333,59.90833],[24.85,59.88333],[23.99194,59.7],[23.82444,59.91306],[23.87056,60.02694],[23.91528,60.13694],[24.00333,60.35111],[24.04361,60.44778],[24.48556,60.7425],[24.665,60.78972],[24.78222,60.82028]]]},"properties":{"name":"SECT A","freq":"127.425","lat":60.279,"lng":25.231}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[23.87056,60.02694],[23.82444,59.91306],[23.99167,59.70028],[21,59],[20.74167,59.14611],[23.87056,60.02694]]]},"properties":{"name":"SECT B","freq":"125.225","lat":59.497,"lng":22.506}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[23.91528,60.13694],[23.87056,60.02694],[20.74167,59.14611],[19.99861,59.55444],[22.60361,59.89722],[23.91528,60.13694]]]},"properties":{"name":"SECT C","freq":"132.675","lat":59.614,"lng":21.684}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[24.00333,60.35111],[23.91528,60.13694],[22.60361,59.89722],[19.99861,59.55444],[19.98306,59.56278],[19.665,59.78944],[19.93417,59.88417],[21.89972,60.11194],[22.9575,60.23167],[24.00333,60.35111]]]},"properties":{"name":"SECT D","freq":"121.300","lat":59.953,"lng":21.834}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[24.59,61.24528],[24.665,60.78972],[24.48556,60.7425],[24.04361,60.44778],[24.00333,60.35111],[22.9575,60.23167],[21.89972,60.11194],[21.38583,60.38861],[21.35083,60.55444],[21.58583,60.73306],[22.13361,60.77417],[22.28528,60.77389],[22.89417,61.09611],[23.07167,61.0475],[23.36917,61.06167],[23.91722,61.09667],[24.59,61.24528]]]},"properties":{"name":"SECT E","freq":"134.575","lat":60.642,"lng":23.055}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[19.72667,62.19278],[21.17333,61.77639],[21.57778,61.84472],[22.50417,61.525],[22.62444,61.4825],[22.67306,61.48861],[22.62528,61.16944],[22.89417,61.09611],[22.28556,60.77389],[22.13361,60.77417],[21.58583,60.73306],[21.35083,60.55444],[21.38583,60.38861],[21.89972,60.11194],[20.3125,59.93056],[19.93417,59.88417],[19.665,59.78944],[19.26917,60.06667],[19.08667,60.19167],[19.13222,60.30083],[19.5,61.66667],[19.72667,62.19278]]]},"properties":{"name":"SECT F","freq":"132.725","lat":60.991,"lng":20.288}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[21.69194,63.76667],[22.41917,63.44694],[22.77778,63.3],[24.53472,62.5775],[24.57361,62.12333],[24.08917,62.08194],[24.04944,61.94861],[24.13194,61.71861],[24.59778,61.6],[24.59,61.24528],[23.91722,61.09667],[23.36917,61.06167],[23.07167,61.0475],[22.89417,61.09611],[22.62528,61.16944],[22.67306,61.48861],[22.62444,61.4825],[22.50417,61.525],[21.57778,61.84472],[21.17333,61.77639],[19.72667,62.19278],[20.16667,63.16667],[20.66667,63.475],[21.43306,63.60556],[21.5,63.61667],[21.69194,63.76667]]]},"properties":{"name":"SECT G","freq":"127.100","lat":62.394,"lng":22.291}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[29.03778,66.95389],[29.06584,66.85143],[29.12951,66.78917],[29.36114,66.63886],[29.57293,66.43285],[29.697,66.27194],[29.92329,66.12714],[30.07558,65.88104],[30.13407,65.69972],[30.13847,65.66868],[30.01711,65.69648],[29.72187,65.63708],[29.8639,65.56044],[29.75471,65.49737],[29.74658,65.3474],[29.60179,65.25993],[29.634,65.23159],[29.88566,65.2063],[29.81933,65.14428],[29.89686,65.10514],[29.62694,65.06056],[25.40583,63.83417],[23.89028,64.33806],[22.91667,64.68333],[24.14,65.53],[24.15975,65.61281],[24.17256,65.69982],[24.1378,65.77939],[24.15317,65.86258],[24.03736,65.99228],[23.94519,66.08585],[23.89186,66.16767],[23.72761,66.19538],[23.64579,66.30156],[23.67142,66.37501],[23.65012,66.45483],[23.79708,66.52112],[23.88917,66.57278],[24.77833,66.58639],[25.14639,66.77306],[25.71167,66.96417],[26.325,66.955],[26.65472,66.85472],[26.80222,66.66167],[29.03778,66.95389]]]},"properties":{"name":"SECT H","freq":"124.200","lat":65.399,"lng":26.528}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[20.54861,69.06],[20.71732,69.11979],[21.05754,69.03629],[21.10868,69.10393],[20.98672,69.19328],[21.0082,69.22165],[21.09402,69.25955],[21.27882,69.31188],[21.62709,69.27659],[22.17576,68.95632],[22.34078,68.82722],[22.37452,68.71667],[22.53539,68.74451],[22.80082,68.68755],[23.04595,68.68934],[23.16758,68.62852],[23.44064,68.69216],[23.67352,68.70552],[23.77539,68.81885],[23.87146,68.83652],[23.9914,68.82098],[24.07559,68.77997],[24.15296,68.75359],[24.25096,68.72713],[24.58789,68.68263],[24.78342,68.63623],[24.90317,68.55459],[24.91692,68.60525],[25.11639,68.63959],[25.1422,68.78723],[25.24329,68.84142],[25.4748,68.90452],[25.58814,68.88326],[25.65348,68.90702],[25.77727,69.01791],[25.73837,69.14758],[25.70204,69.25366],[25.75841,69.33187],[25.84665,69.39384],[25.82085,69.43468],[25.85042,69.4972],[25.85821,69.54176],[25.97658,69.61024],[25.89149,69.6655],[26.01542,69.71987],[26.14769,69.74904],[26.25865,69.80919],[26.38502,69.85487],[26.46771,69.94042],[26.84867,69.9602],[27.04181,69.91082],[27.30067,69.95473],[27.28879,69.98452],[27.40928,70.01232],[27.52599,70.02346],[27.61246,70.07456],[27.76011,70.0717],[27.95938,70.0921],[27.98429,70.01397],[28.16071,69.92099],[28.34527,69.88083],[28.33048,69.84919],[29.1339,69.69534],[29.3365,69.47832],[29.18911,69.38261],[28.83154,69.22436],[28.80543,69.11116],[28.92917,69.05194],[28.41579,68.91545],[28.46801,68.88544],[28.80079,68.86928],[28.70641,68.73224],[28.43393,68.53967],[28.47898,68.46619],[28.64615,68.1963],[29.32709,68.07454],[29.65941,67.80296],[30.01704,67.67355],[29.93022,67.52252],[29.69816,67.38774],[29.64395,67.33575],[29.52255,67.3099],[29.49114,67.25916],[29.1847,67.06529],[29.03778,66.95389],[26.80222,66.66167],[26.65472,66.85472],[26.325,66.955],[25.71167,66.96417],[25.14639,66.77306],[24.77833,66.58639],[23.88917,66.57278],[23.89896,66.71511],[23.87957,66.76324],[23.99535,66.8212],[23.78438,66.99693],[23.55448,67.16747],[23.59587,67.20782],[23.54626,67.22519],[23.57528,67.26836],[23.72974,67.28834],[23.75583,67.33224],[23.7307,67.38643],[23.76458,67.42821],[23.5405,67.46104],[23.49486,67.44661],[23.39371,67.48509],[23.55422,67.61758],[23.4871,67.6984],[23.47762,67.84258],[23.66461,67.94145],[23.55005,67.99516],[23.38792,68.04813],[23.2867,68.15427],[23.15239,68.13673],[23.14407,68.2463],[23.05936,68.30164],[22.89971,68.34139],[22.82644,68.38746],[22.71799,68.39668],[22.63683,68.42399],[22.55014,68.43592],[22.43216,68.46491],[22.34176,68.44487],[22.34683,68.48223],[22.04325,68.47967],[21.98744,68.53163],[21.89032,68.58389],[21.70484,68.59475],[21.70534,68.62616],[21.62307,68.66092],[21.42031,68.69588],[21.38386,68.76485],[21.29908,68.7624],[21.20848,68.82224],[20.99906,68.89615],[20.90462,68.89299],[20.8448,68.93588],[20.92522,68.95629],[20.77631,69.0322],[20.54861,69.06]]]},"properties":{"name":"SECT J","freq":"126.100","lat":68.772,"lng":27.147}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[24.59778,61.6],[25.505,61.62528],[26.495,61.555],[25.63444,60.77333],[25.48583,60.83083],[24.78222,60.82028],[24.665,60.78972],[24.59,61.24528],[24.59778,61.6]]]},"properties":{"name":"SECT K","freq":"123.775","lat":61.199,"lng":25.016}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[29.44417,61.42444],[29.24483,61.27069],[29.08426,61.21043],[29.02197,61.18849],[28.95371,61.15067],[28.85063,61.12965],[28.77665,61.07925],[28.655,60.9495],[28.5246,60.9571],[27.99128,60.66898],[27.88874,60.61294],[27.77441,60.53357],[27.74795,60.45117],[27.68692,60.43357],[27.72583,60.39167],[27.62806,60.33167],[26.51528,60.33778],[26.13333,60.45222],[25.84167,60.69222],[25.63444,60.77333],[26.495,61.555],[26.84694,61.91472],[27.95528,61.70028],[29.44417,61.42444]]]},"properties":{"name":"SECT L","freq":"130.975","lat":61.09,"lng":27.344}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[25.17806,62.80083],[25.66417,62.80944],[25.99528,62.66389],[26.30944,62.52389],[26.56083,62.41028],[26.57639,62.12056],[26.84694,61.91472],[26.495,61.555],[25.505,61.62528],[24.59778,61.6],[24.13194,61.71861],[24.04944,61.94861],[24.08917,62.08194],[24.57361,62.12333],[24.53472,62.5775],[24.83528,62.71417],[25.17806,62.80083]]]},"properties":{"name":"SECT M","freq":"132.325","lat":62.182,"lng":25.448}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[29.97194,63.75722],[30.4840,63.46670],[30.9344,63.35545],[31.2382,63.19513],[31.2721,63.10763],[31.4630,63.02425],[31.5867,62.90871],[31.4392,62.78488],[31.3732,62.64972],[31.2266,62.50356],[31.1695,62.4678],[31.0935,62.41661],[30.9668,62.33797],[30.9196,62.30906],[30.7892,62.2508],[30.6695,62.19392],[30.4831,62.06384],[30.1440,61.85224],[29.6452,61.52015],[29.5321,61.49091],[29.44417,61.42444],[27.95528,61.70028],[26.84694,61.91472],[26.57639,62.12056],[26.56083,62.41028],[26.30944,62.52389],[25.99528,62.66389],[26.54472,63.18778],[27.04472,63.1075],[27.02667,63.19583],[27.27472,63.35278],[27.61111,63.41722],[27.91611,63.39722],[28.19194,63.30917],[29.10333,63.64972],[29.60778,63.73611],[29.97194,63.75722]]]},"properties":{"name":"SECT N","freq":"135.525","lat":62.591,"lng":29.494}},{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[22.91667,64.68333],[23.89028,64.33806],[25.40583,63.83417],[29.62694,65.06056],[29.61099,64.92731],[29.66186,64.85259],[29.73963,64.78978],[30.04578,64.79561],[30.10091,64.76122],[30.0414,64.74119],[30.13011,64.63473],[29.98977,64.58714],[30.02803,64.4897],[30.08306,64.37671],[30.27776,64.33118],[30.38828,64.26907],[30.48244,64.26233],[30.48867,64.18017],[30.54833,64.1367],[30.55356,64.10169],[30.4986,64.02069],[30.33178,63.91275],[30.26041,63.82201],[29.97194,63.75722],[29.60778,63.73611],[29.10333,63.64972],[28.19194,63.30917],[27.91611,63.39722],[27.61111,63.41722],[27.27472,63.35278],[27.02667,63.19583],[27.04472,63.1075],[26.54472,63.18778],[25.99528,62.66389],[25.66417,62.80944],[25.17806,62.80083],[24.83528,62.71417],[24.53472,62.5775],[22.77778,63.3],[22.41917,63.44694],[21.69194,63.76667],[22.91667,64.68333]]]},"properties":{"name":"SECT V","freq":"126.300","lat":63.819,"lng":22.933}}]};
+    // Expose ACC sectors for route planner frequency lookup
+    window.AirportApp.accSectors = accGeoJson;
+    L.geoJSON(accGeoJson, {
+      style: { color: '#c0392b', weight: 1.5, fillOpacity: 0, dashArray: '6,4' },
+      onEachFeature: function (feature, layer) {
+        var p = feature.properties;
+        layer.bindTooltip(p.name + '\n' + p.freq + ' MHz', {
+          permanent: true, direction: 'center', className: 'acc-label'
+        });
+        layer.bindPopup('<b>' + p.name + '</b><br>' + p.freq + ' MHz<br>Helsinki Control');
+      }
+    }).addTo(accLayer);
 
     // Weather radio-button control (below main control)
     var wxOverlays = {

@@ -194,6 +194,48 @@ html, body {
   padding: 4px 8px;
 }
 
+/* ACC sector labels */
+.acc-label {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0392b;
+  white-space: pre-line;
+  text-align: center;
+}
+.acc-label::before { display: none; }
+
+/* Airspace labels */
+.airspace-lbl {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-size: 10px;
+  font-weight: 600;
+  color: #2980b9;
+  white-space: pre-line;
+  text-align: center;
+}
+.airspace-lbl::before { display: none; }
+
+/* IFR point markers */
+.ifr-point-marker { background: none !important; border: none !important; }
+.ifr-point-icon {
+  width: 8px; height: 8px;
+  background: #8e44ad;
+  transform: rotate(45deg);
+  position: absolute; top: 1px; left: 1px;
+}
+.ifr-point-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #8e44ad;
+  margin-left: 14px;
+  white-space: nowrap;
+}
+
 /* METAR visual tooltip */
 .metar-tip { line-height: 1.4; }
 .metar-tip-hdr { font-weight: 700; margin-bottom: 1px; }
@@ -1245,6 +1287,11 @@ html, body {
 .route-leg-arrow {
   color: #2980b9;
   margin-right: 2px;
+}
+.route-leg-freq {
+  font-size: 10px;
+  color: #c0392b;
+  margin-top: 1px;
 }
 
 #route-totals {
@@ -2996,5 +3043,4 @@ html, body {
   color: #666;
   line-height: 1;
 }
-
 

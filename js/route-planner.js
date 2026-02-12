@@ -605,6 +605,83 @@
     return warnings;
   }
 
+  // --- Radio frequency helpers ---
+
+  // Point-in-polygon (ray casting)
+  function pointInPolygon(lat, lng, coords) {
+    var inside = false;
+    var ring = coords[0]; // outer ring
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var xi = ring[i][0], yi = ring[i][1];
+      var xj = ring[j][0], yj = ring[j][1];
+      if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  // Find ACC sector at a given lat/lng
+  function getAccSector(lat, lng) {
+    var app = window.AirportApp;
+    if (!app || !app.accSectors) return null;
+    var features = app.accSectors.features;
+    for (var i = 0; i < features.length; i++) {
+      var f = features[i];
+      if (pointInPolygon(lat, lng, f.geometry.coordinates)) {
+        return { name: f.properties.name, freq: f.properties.freq };
+      }
+    }
+    return null;
+  }
+
+  // Get ACC sectors along a leg (check start, mid, end points)
+  function getLegAccSectors(lat1, lng1, lat2, lng2) {
+    var sectors = [];
+    var seen = {};
+    var steps = 5; // sample 6 points along the leg
+    for (var s = 0; s <= steps; s++) {
+      var t = s / steps;
+      var lat = lat1 + (lat2 - lat1) * t;
+      var lng = lng1 + (lng2 - lng1) * t;
+      var sec = getAccSector(lat, lng);
+      if (sec && !seen[sec.name]) {
+        seen[sec.name] = true;
+        sectors.push(sec);
+      }
+    }
+    return sectors;
+  }
+
+  // Get airport frequencies from waypoint data
+  function getAirportFreqs(wp) {
+    if (!wp.data || !wp.data[12]) return [];
+    return wp.data[12]; // [[type, freq], ...]
+  }
+
+  // Format airport frequencies for display (compact)
+  function formatAirportFreqs(freqs) {
+    var parts = [];
+    for (var i = 0; i < freqs.length; i++) {
+      parts.push(freqs[i][0] + ' ' + freqs[i][1]);
+    }
+    return parts.join(', ');
+  }
+
+  // Build radio info for a waypoint (airport freqs)
+  function wpRadioInfo(wp) {
+    var freqs = getAirportFreqs(wp);
+    if (freqs.length === 0) return '';
+    return formatAirportFreqs(freqs);
+  }
+
+  // Build radio info for a leg (ACC sectors)
+  function legRadioInfo(lat1, lng1, lat2, lng2) {
+    var sectors = getLegAccSectors(lat1, lng1, lat2, lng2);
+    if (sectors.length === 0) return '';
+    return sectors.map(function (s) { return s.name + ' ' + s.freq; }).join(', ');
+  }
+
   // --- Core logic ---
 
   function recalculate() {
@@ -1060,6 +1137,10 @@
         html += Math.round(leg.magHdg) + '&deg;M &middot; ';
         html += formatTime(leg.time) + ' &middot; ';
         html += leg.fuel.toFixed(1) + ' gal';
+        var accInfo = legRadioInfo(
+          waypoints[i].latlng.lat, waypoints[i].latlng.lng,
+          waypoints[i + 1].latlng.lat, waypoints[i + 1].latlng.lng);
+        if (accInfo) html += '<div class="route-leg-freq">' + accInfo + '</div>';
         html += '</div>';
       }
     }
@@ -2587,6 +2668,7 @@
       navRows += '<td class="num"></td>'; // DIST
       navRows += '<td class="num">' + etaStr + '</td>';
       navRows += '<td class="num">' + remFuel.toFixed(1) + '</td>';
+      navRows += '<td class="freq">' + wpRadioInfo(wp) + '</td>';
       navRows += '<td class="wx">' + wxLabel + '</td>';
       navRows += '<td class="num">' + notamLabel + '</td>';
       navRows += '</tr>';
@@ -2596,6 +2678,9 @@
         var leg = legs[i];
         cumFuel += leg.fuel;
         var legTimeMin = Math.round(leg.time * 60);
+        var legFreq = legRadioInfo(
+          waypoints[i].latlng.lat, waypoints[i].latlng.lng,
+          waypoints[i + 1].latlng.lat, waypoints[i + 1].latlng.lng);
 
         navRows += '<tr class="leg-row">';
         navRows += '<td></td><td></td><td></td><td></td>';
@@ -2603,6 +2688,7 @@
         navRows += '<td class="num">' + Math.round(leg.dist) + '</td>';
         navRows += '<td class="num">' + legTimeMin + ' min</td>';
         navRows += '<td class="num">' + leg.fuel.toFixed(1) + '</td>';
+        navRows += '<td class="freq">' + legFreq + '</td>';
         navRows += '<td></td><td></td>';
         navRows += '</tr>';
       }
@@ -2633,29 +2719,29 @@
       totalsHtml += '<tr class="totals-row"><td></td><td>TRIP</td><td></td><td></td><td></td>'
         + '<td class="num">' + Math.round(tripDist) + '</td>'
         + '<td class="num">' + formatTime(tripTime) + '</td>'
-        + '<td class="num">' + tripFuel.toFixed(1) + '</td><td></td><td></td></tr>';
+        + '<td class="num">' + tripFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row"><td></td><td>ALT</td><td>' + esc(altCode || '') + '</td><td></td><td></td>'
         + '<td class="num">' + Math.round(altDist) + '</td>'
         + '<td class="num">' + formatTime(altTime) + '</td>'
-        + '<td class="num">' + altFuel.toFixed(1) + '</td><td></td><td></td></tr>';
+        + '<td class="num">' + altFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row"><td></td><td>RESERVE</td><td>' + Math.round(reserveHours * 60) + ' min</td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num">' + reserveFuel.toFixed(1) + '</td><td></td><td></td></tr>';
+        + '<td class="num">' + reserveFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row totals-req"><td></td><td>REQUIRED</td><td></td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num">' + requiredFuel.toFixed(1) + '</td><td></td><td></td></tr>';
+        + '<td class="num">' + requiredFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row"><td></td><td>REMAINING</td><td></td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td></tr>';
+        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
     } else {
       totalsHtml += '<tr class="totals-row"><td></td><td>TOTAL</td><td></td><td></td><td></td>'
         + '<td class="num">' + Math.round(totalDist) + '</td>'
         + '<td class="num">' + formatTime(totalTime) + '</td>'
-        + '<td class="num">' + totalFuel.toFixed(1) + '</td><td></td><td></td></tr>';
+        + '<td class="num">' + totalFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
       var remaining = fuel - totalFuel;
       totalsHtml += '<tr class="totals-row"><td></td><td>REMAINING</td><td></td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td></tr>';
+        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
     }
 
     // Wind-adjusted totals (read from DOM if available)
@@ -2844,7 +2930,7 @@
         + '<div class="section"><h2>NAV LOG</h2>'
         + '<table class="nav-log">'
         + '<thead><tr>'
-        + '<th>#</th><th>WPT</th><th>Name</th><th>ELEV</th><th>HDG</th><th>DIST</th><th>ETA/ETE</th><th>FUEL</th><th>WX</th><th>NOTAM</th>'
+        + '<th>#</th><th>WPT</th><th>Name</th><th>ELEV</th><th>HDG</th><th>DIST</th><th>ETA/ETE</th><th>FUEL</th><th>FREQ</th><th>WX</th><th>NOTAM</th>'
         + '</tr></thead>'
         + '<tbody>' + navRows + '</tbody>'
         + '<tfoot>' + totalsHtml + '</tfoot>'
@@ -3668,6 +3754,7 @@
       + 'table.nav-log .name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'
       + 'table.nav-log .num { text-align: right; }'
       + 'table.nav-log .wx { text-align: center; font-weight: 700; }'
+      + 'table.nav-log .freq { font-size: 9px; color: #c0392b; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
       + 'tr.leg-row td { color: #555; font-size: 9px; border-top: none; }'
       + 'tr.wp-row td { border-bottom: none; }'
       + 'tr.alt-sep td { background: #ffe0b2; font-weight: 700; text-align: center; border: 1px solid #bbb; padding: 2px; }'
