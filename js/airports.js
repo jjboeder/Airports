@@ -292,6 +292,24 @@
     var result = { rawOb: raw.trim(), fltCat: null };
     var tokens = raw.trim().split(/\s+/);
 
+    // Observation time: ddHHmmZ (e.g. 121920Z)
+    for (var i = 0; i < tokens.length; i++) {
+      var tm = tokens[i].match(/^(\d{2})(\d{2})(\d{2})Z$/);
+      if (tm) {
+        var now = new Date();
+        var obsDay = parseInt(tm[1], 10);
+        var obsH = parseInt(tm[2], 10);
+        var obsM = parseInt(tm[3], 10);
+        var obs = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), obsDay, obsH, obsM, 0));
+        // Handle month rollover (obs day > current day = last month)
+        if (obs.getTime() > now.getTime() + 86400000) {
+          obs.setUTCMonth(obs.getUTCMonth() - 1);
+        }
+        result.obsTime = obs.getTime();
+        break;
+      }
+    }
+
     // Wind: dddssKT or dddssGggKT or VRBssKT
     for (var i = 0; i < tokens.length; i++) {
       var wm = tokens[i].match(/^(\d{3}|VRB)(\d{2,3})(G(\d{2,3}))?KT$/);
@@ -867,6 +885,25 @@
     }
   }
 
+  // Format data age as human-readable string with staleness color
+  // METAR: <30min green, 30-60min orange, >60min red
+  // TAF: <2h green, 2-6h orange, >6h red
+  function formatAge(epochMs, type) {
+    if (!epochMs) return null;
+    var ageMin = Math.round((Date.now() - epochMs) / 60000);
+    if (ageMin < 0) ageMin = 0;
+    var label;
+    if (ageMin < 60) label = ageMin + 'min';
+    else label = Math.floor(ageMin / 60) + 'h' + (ageMin % 60 ? (ageMin % 60) + 'm' : '');
+    var color;
+    if (type === 'taf') {
+      color = ageMin < 120 ? '#27ae60' : ageMin < 360 ? '#e67e22' : '#e74c3c';
+    } else {
+      color = ageMin < 30 ? '#27ae60' : ageMin < 60 ? '#e67e22' : '#e74c3c';
+    }
+    return '<span class="data-age" style="color:' + color + ';" title="Data age">' + label + ' ago</span>';
+  }
+
   // --- Render a METAR into the popup placeholder ---
   function renderMetarInPopup(el, metar) {
     if (!metar) {
@@ -875,7 +912,10 @@
     }
     var cat = METAR_CAT[metar.fltCat] || { color: '#888', label: metar.fltCat || '?' };
 
-    var html = '<span class="metar-cat" style="background:' + cat.color + ';">' + cat.label + '</span>';
+    var metarAge = formatAge(metar.obsTime, 'metar');
+    var html = '';
+    if (metarAge) html += '<div class="data-age-wrap">' + metarAge + '</div>';
+    html += '<span class="metar-cat" style="background:' + cat.color + ';">' + cat.label + '</span>';
     if (isStrongWind(metar.wspd, metar.wgst)) {
       html += ' <span class="wind-badge">' + WIND_SVG + '</span>';
     }
@@ -1449,7 +1489,12 @@
       mDewp = metarCache[icao].dewp;
     }
 
-    var html = '<div class="taf-header">TAF</div>';
+    var tafIssue = null;
+    if (icao && tafCache[icao] && tafCache[icao][0] && tafCache[icao][0].issueTime) {
+      tafIssue = new Date(tafCache[icao][0].issueTime).getTime();
+    }
+    var tafAge = formatAge(tafIssue, 'taf');
+    var html = '<div class="taf-header">TAF' + (tafAge ? '<div class="data-age-wrap">' + tafAge + '</div>' : '') + '</div>';
     html += '<table class="taf-table"><tbody>';
     // Hour row
     html += '<tr class="taf-row-hour"><td class="taf-row-label"></td>';

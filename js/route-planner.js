@@ -55,6 +55,7 @@
   var OWM_PROXY = 'https://owm-proxy.jjboeder.workers.dev';
   var routeWxOverlay = []; // [{lat, lon, windSpd, windDir, cloud}, ...]
   var routeWxMarkers = null; // L.layerGroup for on-map wind barbs
+  var routeCtrTmaCache = []; // cached CTR/TMA airspaces along the route
 
   // Autorouter state
   var autoRouteId = null;      // current autorouter route ID
@@ -118,6 +119,68 @@
     if (!flInput) return 80;
     var v = parseInt(flInput.value, 10);
     return isNaN(v) ? 80 : v;
+  }
+
+  function isFreqEnabled() {
+    var cb = document.getElementById('route-freq-show');
+    return cb && cb.checked;
+  }
+
+  // Altitude profile along the route (climb/descent aware)
+  var CLIMB_FT_PER_NM = 500;
+  var DESCENT_FT_PER_NM = 400;
+
+  // Returns altitude in feet at a given distance (nm) from departure
+  function routeAltAtDist(distFromDep) {
+    var cruiseFt = getFL() * 100;
+    if (legs.length === 0) return cruiseFt;
+
+    // Departure elevation
+    var depElev = 0;
+    if (waypoints[0] && waypoints[0].data && waypoints[0].data[5]) {
+      depElev = parseFloat(waypoints[0].data[5]) || 0;
+    }
+    // Arrival elevation
+    var arrIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
+    var arrElev = 0;
+    if (arrIdx >= 0 && waypoints[arrIdx] && waypoints[arrIdx].data && waypoints[arrIdx].data[5]) {
+      arrElev = parseFloat(waypoints[arrIdx].data[5]) || 0;
+    }
+
+    var totalDist = 0;
+    for (var i = 0; i < legs.length; i++) totalDist += legs[i].dist;
+    if (totalDist === 0) return cruiseFt;
+
+    var climbGain = Math.max(0, cruiseFt - depElev);
+    var descentLoss = Math.max(0, cruiseFt - arrElev);
+    var climbDist = climbGain / CLIMB_FT_PER_NM;
+    var descentDist = descentLoss / DESCENT_FT_PER_NM;
+
+    // Scale if route too short for full climb + descent
+    if (climbDist + descentDist > totalDist) {
+      var scale = totalDist / (climbDist + descentDist);
+      climbDist *= scale;
+      descentDist *= scale;
+    }
+
+    var distFromArr = totalDist - distFromDep;
+
+    if (distFromDep < climbDist) {
+      return depElev + distFromDep * CLIMB_FT_PER_NM;
+    }
+    if (distFromArr < descentDist) {
+      return arrElev + distFromArr * DESCENT_FT_PER_NM;
+    }
+    return cruiseFt;
+  }
+
+  // Cumulative distances at each waypoint (index 0 = 0, index i = sum of legs 0..i-1)
+  function getCumDists() {
+    var d = [0];
+    for (var i = 0; i < legs.length; i++) {
+      d.push(d[i] + legs[i].dist);
+    }
+    return d;
   }
 
   // --- TAF weather for route ---
@@ -289,6 +352,67 @@
     }
   }
 
+  // Fetch CTR/TMA airspace data along the route (independent of map layer)
+  function fetchRouteCtrTma() {
+    if (waypoints.length < 2) return;
+    var minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    for (var i = 0; i < waypoints.length; i++) {
+      var ll = waypoints[i].latlng;
+      if (ll.lat < minLat) minLat = ll.lat;
+      if (ll.lat > maxLat) maxLat = ll.lat;
+      if (ll.lng < minLng) minLng = ll.lng;
+      if (ll.lng > maxLng) maxLng = ll.lng;
+    }
+    // Add margin around route bbox
+    var latMargin = (maxLat - minLat) * 0.1 + 0.05;
+    var lngMargin = (maxLng - minLng) * 0.1 + 0.05;
+    var bbox = [
+      (minLng - lngMargin).toFixed(4),
+      (minLat - latMargin).toFixed(4),
+      (maxLng + lngMargin).toFixed(4),
+      (maxLat + latMargin).toFixed(4)
+    ].join(',');
+    fetch(OWM_PROXY + '/airspaces?bbox=' + bbox + '&type=4,7,26,28')
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.items) return;
+        routeCtrTmaCache = [];
+        for (var i = 0; i < data.items.length; i++) {
+          var item = data.items[i];
+          if (!item.geometry) continue;
+          if (item.type !== 4 && item.type !== 7 && item.type !== 26 && item.type !== 28) continue;
+          // Try to get frequencies from airport data if missing
+          if ((!item.frequencies || item.frequencies.length === 0) && item.name) {
+            var icaoMatch = item.name.match(/^([A-Z]{4})\b/);
+            if (icaoMatch) {
+              var app = window.AirportApp;
+              var marker = app && app.markersByIcao && app.markersByIcao[icaoMatch[1]];
+              var row = marker && marker._airportData;
+              if (row && row[12] && row[12].length > 0) {
+                item.frequencies = row[12].map(function (f) {
+                  return { name: f[0], value: f[1] };
+                });
+              }
+            }
+          }
+          var ring = item.geometry.type === 'MultiPolygon'
+            ? item.geometry.coordinates[0][0] : item.geometry.coordinates[0];
+          if (ring) {
+            routeCtrTmaCache.push({
+              ring: ring,
+              name: item.name,
+              type: item.type,
+              lowerLimit: item.lowerLimit,
+              upperLimit: item.upperLimit,
+              frequencies: item.frequencies
+            });
+          }
+        }
+        renderPanel();
+      })
+      .catch(function () {});
+  }
+
   function fetchRouteWeather() {
     if (waypoints.length === 0) return;
 
@@ -301,6 +425,9 @@
 
     // Fetch NOTAMs for all waypoints
     fetchRouteNotams();
+
+    // Fetch CTR/TMA airspace data along route
+    fetchRouteCtrTma();
 
     // Collect unique ICAO codes not yet cached or stale
     var toFetch = [];
@@ -649,6 +776,46 @@
     return inside;
   }
 
+  // Convert airspace limit to feet
+  function limitToFeet(limit) {
+    if (!limit) return null;
+    if (limit.unit === 6) return limit.value * 100; // FL → feet
+    if (limit.unit === 0) return Math.round(limit.value * 3.281); // meters → feet
+    return limit.value; // already feet
+  }
+
+  // Find CTR/TMA airspaces at a point that include the given altitude
+  function getCtrTmaAtPoint(lat, lng, altFt) {
+    // Use route planner's own cache (fetched independently of map layer)
+    // Fall back to map's cached data if route cache is empty
+    var app = window.AirportApp;
+    var airspaces = routeCtrTmaCache.length > 0
+      ? routeCtrTmaCache
+      : (app && app.ctrTmaAirspaces ? app.ctrTmaAirspaces : []);
+    var results = [];
+    for (var i = 0; i < airspaces.length; i++) {
+      var a = airspaces[i];
+      if (a.type !== 4 && a.type !== 7 && a.type !== 26 && a.type !== 28) continue; // CTR=4, TMA=7, CTA=26, RMZ=28
+      if (!a.frequencies || a.frequencies.length === 0) continue;
+      var ring = a.ring;
+      var inside = false;
+      for (var j = 0, k = ring.length - 1; j < ring.length; k = j++) {
+        var xj = ring[j][0], yj = ring[j][1];
+        var xk = ring[k][0], yk = ring[k][1];
+        if ((yj > lat) !== (yk > lat) && lng < (xk - xj) * (lat - yj) / (yk - yj) + xj) {
+          inside = !inside;
+        }
+      }
+      if (!inside) continue;
+      var lower = limitToFeet(a.lowerLimit);
+      var upper = limitToFeet(a.upperLimit);
+      if (lower !== null && altFt < lower) continue;
+      if (upper !== null && altFt > upper) continue;
+      results.push(a);
+    }
+    return results;
+  }
+
   // Find ACC sector at a given lat/lng
   function getAccSector(lat, lng) {
     var app = window.AirportApp;
@@ -663,28 +830,84 @@
     return null;
   }
 
-  // Get ACC sectors along a leg (check start, mid, end points)
-  function getLegAccSectors(lat1, lng1, lat2, lng2) {
+  // Get radio sectors along a leg: CTR/TMA (altitude-aware) + ACC (outside CTR/TMA)
+  // startDist = cumulative nm from departure at leg start, legDist = leg distance in nm
+  function getLegRadioSectors(lat1, lng1, lat2, lng2, startDist, legDist) {
     var sectors = [];
     var seen = {};
-    var steps = 5; // sample 6 points along the leg
+    var steps = 5;
     for (var s = 0; s <= steps; s++) {
       var t = s / steps;
       var lat = lat1 + (lat2 - lat1) * t;
       var lng = lng1 + (lng2 - lng1) * t;
-      var sec = getAccSector(lat, lng);
-      if (sec && !seen[sec.name]) {
-        seen[sec.name] = true;
-        sectors.push(sec);
+      var altFt = routeAltAtDist(startDist + t * legDist);
+      // Check CTR/TMA first
+      var ctrTma = getCtrTmaAtPoint(lat, lng, altFt);
+      var inCtrTma = false;
+      for (var c = 0; c < ctrTma.length; c++) {
+        var a = ctrTma[c];
+        var f0 = a.frequencies[0];
+        var label = f0.name || a.name;
+        var key = label + '|' + f0.value;
+        if (!seen[key]) {
+          seen[key] = true;
+          var TYPE_LABELS = { 4: 'CTR', 7: 'TMA', 26: 'CTA', 28: 'RMZ' };
+          var typeLbl = TYPE_LABELS[a.type] || 'TMA';
+          sectors.push({ name: label, freq: f0.value, phase: typeLbl });
+        }
+        inCtrTma = true;
+      }
+      // ACC sector only if not inside CTR/TMA at this altitude
+      if (!inCtrTma) {
+        var sec = getAccSector(lat, lng);
+        if (sec && !seen[sec.name]) {
+          seen[sec.name] = true;
+          sectors.push({ name: sec.name, freq: sec.freq, phase: 'ACC' });
+        }
       }
     }
     return sectors;
   }
 
-  // Get airport frequencies from waypoint data
+  // Get airport frequencies from waypoint data (or look up by ICAO)
   function getAirportFreqs(wp) {
-    if (!wp.data || !wp.data[12]) return [];
-    return wp.data[12]; // [[type, freq], ...]
+    if (wp.data && wp.data[12]) return wp.data[12];
+    // Fall back to markersByIcao lookup
+    if (wp.code) {
+      var app = window.AirportApp;
+      var marker = app && app.markersByIcao && app.markersByIcao[wp.code];
+      var row = marker && marker._airportData;
+      if (row && row[12]) return row[12];
+    }
+    return [];
+  }
+
+  // Filter airport frequencies to operationally relevant ones (ATIS, TWR, APP/RADAR, AFIS etc.)
+  var RELEVANT_FREQ_TYPES = ['ATIS', 'TWR', 'TOWER', 'APP', 'APPROACH', 'DEP', 'DEPARTURE', 'RADAR', 'AFIS', 'A/G', 'AG', 'RDO'];
+  // Sort order: ATIS first, then TWR, then APP/RADAR, then rest
+  var FREQ_ORDER = { 'ATIS': 0, 'TWR': 1, 'TOWER': 1, 'APP': 2, 'APPROACH': 2, 'RADAR': 2, 'DEP': 3, 'DEPARTURE': 3, 'AFIS': 4, 'A/G': 4, 'AG': 4, 'RDO': 4 };
+  function freqSortKey(type) {
+    var t = (type || '').toUpperCase();
+    for (var k in FREQ_ORDER) {
+      if (t.indexOf(k) >= 0) return FREQ_ORDER[k];
+    }
+    return 9;
+  }
+  function getRelevantFreqs(wp) {
+    var all = getAirportFreqs(wp);
+    var filtered = [];
+    for (var i = 0; i < all.length; i++) {
+      var type = (all[i][0] || '').toUpperCase();
+      for (var j = 0; j < RELEVANT_FREQ_TYPES.length; j++) {
+        if (type.indexOf(RELEVANT_FREQ_TYPES[j]) >= 0) {
+          filtered.push(all[i]);
+          break;
+        }
+      }
+    }
+    var result = filtered.length > 0 ? filtered : all;
+    result.sort(function (a, b) { return freqSortKey(a[0]) - freqSortKey(b[0]); });
+    return result;
   }
 
   // Format airport frequencies for display (compact)
@@ -703,9 +926,9 @@
     return formatAirportFreqs(freqs);
   }
 
-  // Build radio info for a leg (ACC sectors)
-  function legRadioInfo(lat1, lng1, lat2, lng2) {
-    var sectors = getLegAccSectors(lat1, lng1, lat2, lng2);
+  // Build radio info for a leg (CTR/TMA + ACC sectors)
+  function legRadioInfo(lat1, lng1, lat2, lng2, startDist, legDist) {
+    var sectors = getLegRadioSectors(lat1, lng1, lat2, lng2, startDist, legDist);
     if (sectors.length === 0) return '';
     return sectors.map(function (s) { return s.name + ' ' + s.freq; }).join(', ');
   }
@@ -741,7 +964,14 @@
 
   function addNamedWaypoint(latlng, code, name) {
     if (!routeActive) return;
-    waypoints.push({ latlng: latlng, data: null, code: code, name: name || code });
+    // Try to get airport data from loaded markers
+    var data = null;
+    var app = window.AirportApp;
+    if (code && app && app.markersByIcao && app.markersByIcao[code]) {
+      data = app.markersByIcao[code]._airportData;
+      if (!name && data) name = getName(data);
+    }
+    waypoints.push({ latlng: latlng, data: data, code: code, name: name || code });
     recalculate();
     renderRouteOnMap();
     renderPanel();
@@ -925,6 +1155,16 @@
       var marker = L.marker(wp.latlng, { icon: icon, interactive: true, draggable: isCustom })
         .bindTooltip(tipText, { direction: 'top', offset: [0, -11] })
         .addTo(routeLayerGroup);
+      // Show permanent name label for non-airport waypoints (airports already show ICAO on map)
+      if (isCustom && wp.code) {
+        var labelIcon = L.divIcon({
+          className: 'route-wp-label',
+          html: wp.code,
+          iconSize: null,
+          iconAnchor: [-14, 10]
+        });
+        L.marker(wp.latlng, { icon: labelIcon, interactive: false }).addTo(routeLayerGroup);
+      }
       if (isCustom) {
         (function(wpRef, idx) {
           marker.on('dragend', function(e) {
@@ -952,6 +1192,54 @@
               .catch(function() {});
           });
         })(wp, i);
+      }
+    }
+
+    // Collision tracking for all frequency labels (screen-space boxes)
+    var placedBoxes = [];
+    var LBL_W = 90, LBL_H = 28; // approximate label size in pixels
+    var LBL_PAD = 6; // padding between labels
+
+    function boxOverlaps(bx) {
+      for (var pb = 0; pb < placedBoxes.length; pb++) {
+        var ob = placedBoxes[pb];
+        if (bx.x < ob.x + ob.w + LBL_PAD && bx.x + bx.w + LBL_PAD > ob.x &&
+            bx.y < ob.y + ob.h + LBL_PAD && bx.y + bx.h + LBL_PAD > ob.y) return true;
+      }
+      return false;
+    }
+
+    // Airport frequency labels at departure, arrival, and alternate
+    if (isFreqEnabled() && waypoints.length >= 2) {
+      var freqApts = [0]; // departure
+      var arrIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
+      if (arrIdx > 0 && freqApts.indexOf(arrIdx) === -1) freqApts.push(arrIdx);
+      if (alternateIndex >= 0 && freqApts.indexOf(alternateIndex) === -1) freqApts.push(alternateIndex);
+      for (var fa = 0; fa < freqApts.length; fa++) {
+        var fIdx = freqApts[fa];
+        var fwp = waypoints[fIdx];
+        var allFqs = getAirportFreqs(fwp);
+        var fqs = [];
+        for (var af = 0; af < allFqs.length; af++) {
+          if ((allFqs[af][0] || '').toUpperCase().indexOf('ATIS') >= 0) fqs.push(allFqs[af]);
+        }
+        if (fqs.length === 0) continue;
+
+        var freqLines = '';
+        for (var ffi = 0; ffi < fqs.length; ffi++) {
+          if (ffi > 0) freqLines += '<br>';
+          freqLines += fqs[ffi][0] + ' ' + fqs[ffi][1];
+        }
+        var fIcon = L.divIcon({
+          className: 'route-apt-freq',
+          html: '<span>' + freqLines + '</span>',
+          iconSize: [0, 0]
+        });
+        L.marker(fwp.latlng, { icon: fIcon, interactive: false }).addTo(routeLayerGroup);
+
+        // Register bounding box (offset matches CSS: left 14px, top 16px)
+        var aptPt = map.latLngToContainerPoint(fwp.latlng);
+        placedBoxes.push({ x: aptPt.x + 14, y: aptPt.y + 16, w: LBL_W, h: LBL_H });
       }
     }
 
@@ -1055,6 +1343,126 @@
         }
       }
     }
+
+    // Register waypoint markers as collision boxes too
+    for (var wi = 0; wi < waypoints.length; wi++) {
+      var wpPt = map.latLngToContainerPoint(waypoints[wi].latlng);
+      placedBoxes.push({ x: wpPt.x - 11, y: wpPt.y - 11, w: 22, h: 22 });
+    }
+
+    // --- Frequency transition markers along route ---
+    if (isFreqEnabled()) addFreqTransitionMarkers(placedBoxes, boxOverlaps);
+  }
+
+  // Identify the active radio key at a point (CTR/TMA name|freq or ACC name)
+  function radioKeyAtPoint(lat, lng, altFt) {
+    var ctrTma = getCtrTmaAtPoint(lat, lng, altFt);
+    if (ctrTma.length > 0) {
+      var a = ctrTma[0];
+      var f0 = a.frequencies[0];
+      return { key: (f0.name || a.name) + '|' + f0.value, label: f0.name || a.name, freq: f0.value };
+    }
+    var sec = getAccSector(lat, lng);
+    if (sec) return { key: sec.name + '|' + sec.freq, label: sec.name, freq: sec.freq };
+    return null;
+  }
+
+  function addFreqTransitionMarkers(placedBoxes, boxOverlaps) {
+    if (waypoints.length < 2) return;
+    var cumD = getCumDists();
+    var seen = {};
+    var BASE_OFFSET = 60; // base pixels offset perpendicular to route
+    var TRANS_LBL_W = 100, TRANS_LBL_H = 30;
+    var side = 1; // alternate sides: 1 = right, -1 = left
+
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i].latlng;
+      var b = waypoints[i + 1].latlng;
+      var legDist = legs[i] ? legs[i].dist : 0;
+      var legStart = cumD[i];
+      var STEPS = 30;
+      var prevAlt = routeAltAtDist(legStart);
+      var prevInfo = radioKeyAtPoint(a.lat, a.lng, prevAlt);
+      var prevKey = prevInfo ? prevInfo.key : null;
+
+      for (var s = 1; s <= STEPS; s++) {
+        var t = s / STEPS;
+        var lat = a.lat + (b.lat - a.lat) * t;
+        var lng = a.lng + (b.lng - a.lng) * t;
+        var sampleAlt = routeAltAtDist(legStart + t * legDist);
+        var info = radioKeyAtPoint(lat, lng, sampleAlt);
+        var curKey = info ? info.key : null;
+
+        if (curKey && curKey !== prevKey && !seen[curKey]) {
+          seen[curKey] = true;
+          // Binary search for more precise crossing point
+          var tLow = (s - 1) / STEPS, tHigh = t;
+          for (var b2 = 0; b2 < 6; b2++) {
+            var tMid = (tLow + tHigh) / 2;
+            var mLat = a.lat + (b.lat - a.lat) * tMid;
+            var mLng = a.lng + (b.lng - a.lng) * tMid;
+            var midAlt = routeAltAtDist(legStart + tMid * legDist);
+            var mInfo = radioKeyAtPoint(mLat, mLng, midAlt);
+            var mKey = mInfo ? mInfo.key : null;
+            if (mKey === curKey) tHigh = tMid;
+            else tLow = tMid;
+          }
+          var crossT = (tLow + tHigh) / 2;
+          var crossLat = a.lat + (b.lat - a.lat) * crossT;
+          var crossLng = a.lng + (b.lng - a.lng) * crossT;
+
+          // Offset label perpendicular to route in screen space
+          var pA = map.latLngToContainerPoint(a);
+          var pB = map.latLngToContainerPoint(b);
+          var dx = pB.x - pA.x, dy = pB.y - pA.y;
+          var len = Math.sqrt(dx * dx + dy * dy) || 1;
+          var crossPt = map.latLngToContainerPoint([crossLat, crossLng]);
+
+          // Try multiple positions: alternate sides, increasing offset
+          var placed = false;
+          var bestPt = null;
+          for (var attempt = 0; attempt < 6 && !placed; attempt++) {
+            var tryS = (attempt % 2 === 0) ? side : -side;
+            var tryOff = BASE_OFFSET + Math.floor(attempt / 2) * 40;
+            var tnx = -dy / len * tryS, tny = dx / len * tryS;
+            var tryPt = L.point(crossPt.x + tnx * tryOff, crossPt.y + tny * tryOff);
+            var box = { x: tryPt.x - TRANS_LBL_W / 2, y: tryPt.y - TRANS_LBL_H / 2, w: TRANS_LBL_W, h: TRANS_LBL_H };
+            if (!bestPt) bestPt = { pt: tryPt, box: box };
+            if (!boxOverlaps(box)) {
+              bestPt = { pt: tryPt, box: box };
+              placed = true;
+            }
+          }
+
+          placedBoxes.push(bestPt.box);
+          var lblLL = map.containerPointToLatLng(bestPt.pt);
+
+          // Connector line from crossing point to label
+          L.polyline([[crossLat, crossLng], [lblLL.lat, lblLL.lng]], {
+            color: '#c0392b', weight: 1.5, opacity: 0.8, interactive: false
+          }).addTo(routeLayerGroup);
+
+          // Dot at crossing point
+          L.circleMarker([crossLat, crossLng], {
+            radius: 4, color: '#fff', fillColor: '#c0392b', fillOpacity: 1,
+            weight: 1.5, interactive: false
+          }).addTo(routeLayerGroup);
+
+          // Label at offset position
+          var markerIcon = L.divIcon({
+            className: 'route-freq-marker',
+            html: '<span>' + info.label + '<br>' + info.freq + '</span>',
+            iconSize: [0, 0]
+          });
+          L.marker([lblLL.lat, lblLL.lng], { icon: markerIcon, interactive: false })
+            .addTo(routeLayerGroup);
+
+          side *= -1; // alternate sides
+        }
+        prevKey = curKey;
+        prevInfo = info;
+      }
+    }
   }
 
   // --- Panel rendering ---
@@ -1146,6 +1554,16 @@
 
       if (wp.data && wp.name) html += '  ' + escapeHtml(wp.name);
       html += '</span>';
+      // Relevant airport frequencies (ATIS, TWR, RADAR, AFIS etc.)
+      var wpFreqs = isFreqEnabled() ? getRelevantFreqs(wp) : [];
+      if (wpFreqs.length > 0) {
+        html += '<div class="route-wp-freq">';
+        for (var fi = 0; fi < wpFreqs.length; fi++) {
+          if (fi > 0) html += ' &nbsp; ';
+          html += '<span class="route-wp-freq-item">' + escapeHtml(wpFreqs[fi][0]) + ' ' + escapeHtml(String(wpFreqs[fi][1])) + '</span>';
+        }
+        html += '</div>';
+      }
       html += '</span>';
 
       // ALT toggle on last waypoint when 3+ waypoints
@@ -1165,10 +1583,14 @@
         html += Math.round(leg.magHdg) + '&deg;M &middot; ';
         html += formatTime(leg.time) + ' &middot; ';
         html += leg.fuel.toFixed(1) + ' gal';
-        var accInfo = legRadioInfo(
-          waypoints[i].latlng.lat, waypoints[i].latlng.lng,
-          waypoints[i + 1].latlng.lat, waypoints[i + 1].latlng.lng);
-        if (accInfo) html += '<div class="route-leg-freq">' + accInfo + '</div>';
+        if (isFreqEnabled()) {
+          var cumD = getCumDists();
+          var accInfo = legRadioInfo(
+            waypoints[i].latlng.lat, waypoints[i].latlng.lng,
+            waypoints[i + 1].latlng.lat, waypoints[i + 1].latlng.lng,
+            cumD[i], leg.dist);
+          if (accInfo) html += '<div class="route-leg-freq">' + accInfo + '</div>';
+        }
         html += '</div>';
       }
     }
@@ -2939,7 +3361,7 @@
       if (waypoints.length >= 2) {
         // Departure airport
         var depWp = waypoints[0];
-        var depFreqs = getAirportFreqs(depWp);
+        var depFreqs = getRelevantFreqs(depWp);
         if (depFreqs.length > 0) {
           freqRows += '<tr class="freq-airport"><td class="freq-phase">DEP</td>';
           freqRows += '<td class="freq-loc">' + esc(depWp.code) + '</td>';
@@ -2951,17 +3373,21 @@
           freqRows += '</td></tr>';
         }
 
-        // ACC sectors along each leg in order
-        var seenAcc = {};
+        // CTR/TMA + ACC sectors along each leg in order (altitude-aware)
+        var printCumD = getCumDists();
+        var seenRadio = {};
         for (var li = 0; li < legs.length; li++) {
-          var sectors = getLegAccSectors(
+          var sectors = getLegRadioSectors(
             waypoints[li].latlng.lat, waypoints[li].latlng.lng,
-            waypoints[li + 1].latlng.lat, waypoints[li + 1].latlng.lng);
+            waypoints[li + 1].latlng.lat, waypoints[li + 1].latlng.lng,
+            printCumD[li], legs[li].dist);
           for (var si = 0; si < sectors.length; si++) {
             var sec = sectors[si];
-            if (seenAcc[sec.name]) continue;
-            seenAcc[sec.name] = true;
-            freqRows += '<tr class="freq-acc"><td class="freq-phase">ACC</td>';
+            var key = sec.name + '|' + sec.freq;
+            if (seenRadio[key]) continue;
+            seenRadio[key] = true;
+            var cls = sec.phase === 'ACC' ? 'freq-acc' : 'freq-ctr';
+            freqRows += '<tr class="' + cls + '"><td class="freq-phase">' + esc(sec.phase) + '</td>';
             freqRows += '<td class="freq-loc">' + esc(sec.name) + '</td>';
             freqRows += '<td class="freq-list"><strong>' + esc(sec.freq) + '</strong></td></tr>';
           }
@@ -2970,7 +3396,7 @@
         // Arrival airport
         var lastIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
         var arrWp = waypoints[lastIdx];
-        var arrFreqs = getAirportFreqs(arrWp);
+        var arrFreqs = getRelevantFreqs(arrWp);
         if (arrFreqs.length > 0) {
           freqRows += '<tr class="freq-airport"><td class="freq-phase">ARR</td>';
           freqRows += '<td class="freq-loc">' + esc(arrWp.code) + '</td>';
@@ -2985,7 +3411,7 @@
         // Alternate airport (if set)
         if (alternateIndex >= 0 && alternateIndex < waypoints.length) {
           var altWp = waypoints[waypoints.length - 1];
-          var altFreqs = getAirportFreqs(altWp);
+          var altFreqs = getRelevantFreqs(altWp);
           if (altFreqs.length > 0) {
             freqRows += '<tr class="freq-airport"><td class="freq-phase">ALT</td>';
             freqRows += '<td class="freq-loc">' + esc(altWp.code) + '</td>';
@@ -3855,6 +4281,7 @@
       + 'table.freq-table .freq-loc { width: 100px; font-weight: 700; }'
       + 'table.freq-table .freq-list { color: #333; }'
       + 'tr.freq-acc td { background: #fdf6f0; }'
+      + 'tr.freq-ctr td { background: #f0f4fd; }'
       + '.freq-section { page-break-before: auto; }'
       + 'tr.leg-row td { color: #555; font-size: 9px; border-top: none; }'
       + 'tr.wp-row td { border-bottom: none; }'
@@ -4639,6 +5066,14 @@
       });
     }
 
+    var freqShowCb = document.getElementById('route-freq-show');
+    if (freqShowCb) {
+      freqShowCb.addEventListener('change', function () {
+        renderRouteOnMap();
+        renderPanel();
+      });
+    }
+
     // Fetch autorouter aircraft ID (DA62)
     fetchAircraftId();
 
@@ -4710,7 +5145,10 @@
     var flInput = document.getElementById('route-fl');
     if (flInput) {
       flInput.addEventListener('input', function () {
-        if (waypoints.length > 0) renderPanel();
+        if (waypoints.length > 0) {
+          renderPanel();
+          renderRouteOnMap();
+        }
       });
     }
   }
