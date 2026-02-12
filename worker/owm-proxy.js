@@ -70,7 +70,7 @@ export default {
         Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
         return new Response(cached.body, { status: cached.status, headers });
       }
-      const upstream = `https://metar.vatsim.net/metar.php?id=${icaoList.join(',')}`;
+      const upstream = `https://aviationweather.gov/api/data/metar?ids=${icaoList.join(',')}&format=raw`;
       const resp = await fetch(upstream);
       const body = await resp.text();
       const cacheResp = new Response(body, {

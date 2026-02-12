@@ -130,17 +130,39 @@
 
     var fcsts = tafJson[0].fcsts;
 
-    // Find active base forecast: skip TEMPO, PROB, and BECMG still transitioning
-    // BECMG uses timeBec for transition end (timeTo = end of TAF period)
-    // Also track the initial (non-BECMG) base for field inheritance
+    // Find active base forecast (AMC1 NCO.OP.160 rules c/d)
+    // BECMG deterioration → apply from timeFrom (start of transition)
+    // BECMG improvement → apply from timeBec (end of transition)
     var active = null;
     var initialBase = null;
     for (var i = 0; i < fcsts.length; i++) {
       var f = fcsts[i];
       if (f.fcstChange === 'TEMPO' || f.fcstChange === 'PROB') continue;
-      var becEnd = f.fcstChange === 'BECMG' ? (f.timeBec || f.timeTo) : null;
-      if (becEnd && epoch < becEnd) continue;
-      if (f.timeFrom <= epoch) {
+      if (f.timeFrom > epoch) continue;
+      if (f.fcstChange === 'BECMG') {
+        var becEnd = f.timeBec || f.timeTo;
+        if (becEnd && epoch >= becEnd) {
+          // BECMG transition complete — apply as base
+          active = f;
+        } else {
+          // BECMG still transitioning — check deterioration vs improvement
+          var refBase = active || initialBase;
+          var bVisM = app.parseTafVisib(f.visib);
+          if (bVisM === null && refBase) bVisM = app.parseTafVisib(refBase.visib);
+          var bCeil = app.tafCeiling(f.clouds);
+          if (bCeil === null && refBase) bCeil = app.tafCeiling(refBase.clouds);
+          var bCat = app.calcFlightCat(bCeil, bVisM);
+          var refVisM = refBase ? app.parseTafVisib(refBase.visib) : null;
+          var refCeil = refBase ? app.tafCeiling(refBase.clouds) : null;
+          var refCat = app.calcFlightCat(refCeil, refVisM);
+          if (CAT_ORDER.indexOf(bCat) > CAT_ORDER.indexOf(refCat)) {
+            // Deterioration — apply from start (rule d.1)
+            active = f;
+          }
+          // Improvement — keep current base, BECMG applies at becEnd (rule d.2)
+        }
+      } else {
+        // FM or initial forecast
         if (!f.fcstChange) initialBase = f;
         active = f;
       }
@@ -159,24 +181,30 @@
     var wspd = active.wspd != null ? active.wspd : (initialBase && initialBase !== active ? initialBase.wspd : null);
     var wgst = active.wgst != null ? active.wgst : (initialBase && initialBase !== active ? initialBase.wgst : null);
 
-    // Apply TEMPO, PROB, and transitioning BECMG overlays — use worst-case
+    // Apply TEMPO/PROB overlays per AMC1 NCO.OP.160 rules (e) and (f)
     for (var i = 0; i < fcsts.length; i++) {
       var f = fcsts[i];
-      var isTempo = f.fcstChange === 'TEMPO' || f.fcstChange === 'PROB';
-      var becEnd = f.fcstChange === 'BECMG' ? (f.timeBec || f.timeTo) : null;
-      var isBecmgTransition = f.fcstChange === 'BECMG' && becEnd && epoch < becEnd;
-      if (!isTempo && !isBecmgTransition) continue;
+      if (f.fcstChange !== 'TEMPO' && f.fcstChange !== 'PROB') continue;
       if (f.timeFrom > epoch || (f.timeTo && f.timeTo <= epoch)) continue;
 
+      // Rule (f): PROB30/40 TEMPO → disregard entirely
+      if (f.fcstChange === 'TEMPO' && f.probability >= 30) continue;
+
+      // Rule (e): standalone TEMPO or PROB30/40
       var tVisM = app.parseTafVisib(f.visib);
       if (tVisM === null) tVisM = visM;
       var tCeiling = app.tafCeiling(f.clouds);
       if (tCeiling === null) tCeiling = ceiling;
       var tCat = app.calcFlightCat(tCeiling, tVisM);
 
-      if (CAT_ORDER.indexOf(tCat) > CAT_ORDER.indexOf(cat)) {
-        cat = tCat;
-      }
+      // Rule (e.3): improvement → disregard
+      if (CAT_ORDER.indexOf(tCat) <= CAT_ORDER.indexOf(cat)) continue;
+
+      // Rule (e.2): transient/showery only (TS, SH without persistent) → may ignore
+      if (app.isPersistentWx && !app.isPersistentWx(f.wxString)) continue;
+
+      // Persistent deterioration → apply (rule e.1)
+      cat = tCat;
 
       // Worst-case wind from overlays
       if (f.wspd != null && (wspd === null || f.wspd > wspd)) wspd = f.wspd;
@@ -2668,7 +2696,6 @@
       navRows += '<td class="num"></td>'; // DIST
       navRows += '<td class="num">' + etaStr + '</td>';
       navRows += '<td class="num">' + remFuel.toFixed(1) + '</td>';
-      navRows += '<td class="freq">' + wpRadioInfo(wp) + '</td>';
       navRows += '<td class="wx">' + wxLabel + '</td>';
       navRows += '<td class="num">' + notamLabel + '</td>';
       navRows += '</tr>';
@@ -2678,17 +2705,12 @@
         var leg = legs[i];
         cumFuel += leg.fuel;
         var legTimeMin = Math.round(leg.time * 60);
-        var legFreq = legRadioInfo(
-          waypoints[i].latlng.lat, waypoints[i].latlng.lng,
-          waypoints[i + 1].latlng.lat, waypoints[i + 1].latlng.lng);
-
         navRows += '<tr class="leg-row">';
         navRows += '<td></td><td></td><td></td><td></td>';
         navRows += '<td class="num">' + Math.round(leg.magHdg) + '°</td>';
         navRows += '<td class="num">' + Math.round(leg.dist) + '</td>';
         navRows += '<td class="num">' + legTimeMin + ' min</td>';
         navRows += '<td class="num">' + leg.fuel.toFixed(1) + '</td>';
-        navRows += '<td class="freq">' + legFreq + '</td>';
         navRows += '<td></td><td></td>';
         navRows += '</tr>';
       }
@@ -2719,29 +2741,29 @@
       totalsHtml += '<tr class="totals-row"><td></td><td>TRIP</td><td></td><td></td><td></td>'
         + '<td class="num">' + Math.round(tripDist) + '</td>'
         + '<td class="num">' + formatTime(tripTime) + '</td>'
-        + '<td class="num">' + tripFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
+        + '<td class="num">' + tripFuel.toFixed(1) + '</td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row"><td></td><td>ALT</td><td>' + esc(altCode || '') + '</td><td></td><td></td>'
         + '<td class="num">' + Math.round(altDist) + '</td>'
         + '<td class="num">' + formatTime(altTime) + '</td>'
-        + '<td class="num">' + altFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
+        + '<td class="num">' + altFuel.toFixed(1) + '</td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row"><td></td><td>RESERVE</td><td>' + Math.round(reserveHours * 60) + ' min</td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num">' + reserveFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
+        + '<td class="num">' + reserveFuel.toFixed(1) + '</td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row totals-req"><td></td><td>REQUIRED</td><td></td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num">' + requiredFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
+        + '<td class="num">' + requiredFuel.toFixed(1) + '</td><td></td><td></td></tr>';
       totalsHtml += '<tr class="totals-row"><td></td><td>REMAINING</td><td></td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
+        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td></tr>';
     } else {
       totalsHtml += '<tr class="totals-row"><td></td><td>TOTAL</td><td></td><td></td><td></td>'
         + '<td class="num">' + Math.round(totalDist) + '</td>'
         + '<td class="num">' + formatTime(totalTime) + '</td>'
-        + '<td class="num">' + totalFuel.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
+        + '<td class="num">' + totalFuel.toFixed(1) + '</td><td></td><td></td></tr>';
       var remaining = fuel - totalFuel;
       totalsHtml += '<tr class="totals-row"><td></td><td>REMAINING</td><td></td><td></td><td></td>'
         + '<td></td><td></td>'
-        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td><td></td></tr>';
+        + '<td class="num' + (remaining < 0 ? ' warn' : '') + '">' + remaining.toFixed(1) + '</td><td></td><td></td></tr>';
     }
 
     // Wind-adjusted totals (read from DOM if available)
@@ -2912,6 +2934,77 @@
 
       var llfHtml = asyncData.llfHtml;
 
+      // --- Build Radio Frequencies table ---
+      var freqRows = '';
+      if (waypoints.length >= 2) {
+        // Departure airport
+        var depWp = waypoints[0];
+        var depFreqs = getAirportFreqs(depWp);
+        if (depFreqs.length > 0) {
+          freqRows += '<tr class="freq-airport"><td class="freq-phase">DEP</td>';
+          freqRows += '<td class="freq-loc">' + esc(depWp.code) + '</td>';
+          freqRows += '<td class="freq-list">';
+          for (var fi = 0; fi < depFreqs.length; fi++) {
+            freqRows += esc(depFreqs[fi][0]) + ' <strong>' + esc(String(depFreqs[fi][1])) + '</strong>';
+            if (fi < depFreqs.length - 1) freqRows += ' &nbsp; ';
+          }
+          freqRows += '</td></tr>';
+        }
+
+        // ACC sectors along each leg in order
+        var seenAcc = {};
+        for (var li = 0; li < legs.length; li++) {
+          var sectors = getLegAccSectors(
+            waypoints[li].latlng.lat, waypoints[li].latlng.lng,
+            waypoints[li + 1].latlng.lat, waypoints[li + 1].latlng.lng);
+          for (var si = 0; si < sectors.length; si++) {
+            var sec = sectors[si];
+            if (seenAcc[sec.name]) continue;
+            seenAcc[sec.name] = true;
+            freqRows += '<tr class="freq-acc"><td class="freq-phase">ACC</td>';
+            freqRows += '<td class="freq-loc">' + esc(sec.name) + '</td>';
+            freqRows += '<td class="freq-list"><strong>' + esc(sec.freq) + '</strong></td></tr>';
+          }
+        }
+
+        // Arrival airport
+        var lastIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
+        var arrWp = waypoints[lastIdx];
+        var arrFreqs = getAirportFreqs(arrWp);
+        if (arrFreqs.length > 0) {
+          freqRows += '<tr class="freq-airport"><td class="freq-phase">ARR</td>';
+          freqRows += '<td class="freq-loc">' + esc(arrWp.code) + '</td>';
+          freqRows += '<td class="freq-list">';
+          for (var fi = 0; fi < arrFreqs.length; fi++) {
+            freqRows += esc(arrFreqs[fi][0]) + ' <strong>' + esc(String(arrFreqs[fi][1])) + '</strong>';
+            if (fi < arrFreqs.length - 1) freqRows += ' &nbsp; ';
+          }
+          freqRows += '</td></tr>';
+        }
+
+        // Alternate airport (if set)
+        if (alternateIndex >= 0 && alternateIndex < waypoints.length) {
+          var altWp = waypoints[waypoints.length - 1];
+          var altFreqs = getAirportFreqs(altWp);
+          if (altFreqs.length > 0) {
+            freqRows += '<tr class="freq-airport"><td class="freq-phase">ALT</td>';
+            freqRows += '<td class="freq-loc">' + esc(altWp.code) + '</td>';
+            freqRows += '<td class="freq-list">';
+            for (var fi = 0; fi < altFreqs.length; fi++) {
+              freqRows += esc(altFreqs[fi][0]) + ' <strong>' + esc(String(altFreqs[fi][1])) + '</strong>';
+              if (fi < altFreqs.length - 1) freqRows += ' &nbsp; ';
+            }
+            freqRows += '</td></tr>';
+          }
+        }
+      }
+      var freqTableHtml = '';
+      if (freqRows) {
+        freqTableHtml = '<div class="section freq-section"><h2>RADIO FREQUENCIES</h2>'
+          + '<table class="freq-table"><thead><tr><th>Phase</th><th>Station</th><th>Frequencies</th></tr></thead>'
+          + '<tbody>' + freqRows + '</tbody></table></div>';
+      }
+
       var html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
         + '<title>Flight Plan ' + esc(depCode) + ' — ' + esc(destCode) + '</title>'
         + '<style>' + printCSS() + '</style></head><body>'
@@ -2930,7 +3023,7 @@
         + '<div class="section"><h2>NAV LOG</h2>'
         + '<table class="nav-log">'
         + '<thead><tr>'
-        + '<th>#</th><th>WPT</th><th>Name</th><th>ELEV</th><th>HDG</th><th>DIST</th><th>ETA/ETE</th><th>FUEL</th><th>FREQ</th><th>WX</th><th>NOTAM</th>'
+        + '<th>#</th><th>WPT</th><th>Name</th><th>ELEV</th><th>HDG</th><th>DIST</th><th>ETA/ETE</th><th>FUEL</th><th>WX</th><th>NOTAM</th>'
         + '</tr></thead>'
         + '<tbody>' + navRows + '</tbody>'
         + '<tfoot>' + totalsHtml + '</tfoot>'
@@ -2938,6 +3031,7 @@
         + windLine
         + icingLine
         + '</div>'
+        + freqTableHtml
         + wbHtml
         + wxHtml
         + llfHtml
@@ -3754,7 +3848,14 @@
       + 'table.nav-log .name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'
       + 'table.nav-log .num { text-align: right; }'
       + 'table.nav-log .wx { text-align: center; font-weight: 700; }'
-      + 'table.nav-log .freq { font-size: 9px; color: #c0392b; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
+      + 'table.freq-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }'
+      + 'table.freq-table th { background: #f0f0f0; font-weight: 700; text-align: left; padding: 2px 6px; border: 1px solid #bbb; }'
+      + 'table.freq-table td { padding: 2px 6px; border: 1px solid #ddd; }'
+      + 'table.freq-table .freq-phase { width: 36px; font-weight: 700; color: #555; }'
+      + 'table.freq-table .freq-loc { width: 100px; font-weight: 700; }'
+      + 'table.freq-table .freq-list { color: #333; }'
+      + 'tr.freq-acc td { background: #fdf6f0; }'
+      + '.freq-section { page-break-before: auto; }'
       + 'tr.leg-row td { color: #555; font-size: 9px; border-top: none; }'
       + 'tr.wp-row td { border-bottom: none; }'
       + 'tr.alt-sep td { background: #ffe0b2; font-weight: 700; text-align: center; border: 1px solid #bbb; padding: 2px; }'

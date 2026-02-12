@@ -1227,6 +1227,19 @@
     return ceiling;
   }
 
+  // Check if weather string contains persistent phenomena (rule e)
+  // Persistent: BR,FG,HZ,FU,DU,SA,RA,DZ,SN,SG,PL,GR,GS,IC,UP and continuous precip
+  // Transient: TS,SH-only (showers without persistent phenomena)
+  // No wxString = ceiling/vis change only → apply conservatively
+  function isPersistentWx(wxString) {
+    if (!wxString) return true;
+    var persistent = ['BR','FG','HZ','FU','DU','SA','RA','DZ','SN','SG','PL','GR','GS','IC','UP'];
+    for (var i = 0; i < persistent.length; i++) {
+      if (wxString.indexOf(persistent[i]) >= 0) return true;
+    }
+    return false;
+  }
+
   function computeHourlyCategories(tafJson) {
     if (!tafJson || !tafJson.length || !tafJson[0].fcsts || tafJson[0].fcsts.length === 0) return null;
 
@@ -1240,17 +1253,40 @@
       var epoch = t.getTime() / 1000;
       var utcHour = t.getUTCHours();
 
-      // Find active base forecast: skip TEMPO, PROB, and BECMG still transitioning
-      // BECMG uses timeBec for transition end (timeTo = end of TAF period)
-      // Also track the initial (non-BECMG) base for field inheritance
+      // Find active base forecast (AMC1 NCO.OP.160 rules c/d)
+      // BECMG deterioration → apply from timeFrom (start of transition)
+      // BECMG improvement → apply from timeBec (end of transition)
       var active = null;
       var initialBase = null;
       for (var i = 0; i < fcsts.length; i++) {
         var f = fcsts[i];
         if (f.fcstChange === 'TEMPO' || f.fcstChange === 'PROB') continue;
-        var becEnd = f.fcstChange === 'BECMG' ? (f.timeBec || f.timeTo) : null;
-        if (becEnd && epoch < becEnd) continue;
-        if (f.timeFrom <= epoch) {
+        if (f.timeFrom > epoch) continue;
+        if (f.fcstChange === 'BECMG') {
+          var becEnd = f.timeBec || f.timeTo;
+          if (becEnd && epoch >= becEnd) {
+            // BECMG transition complete — apply as base
+            active = f;
+          } else {
+            // BECMG still transitioning — check deterioration vs improvement
+            // Compute BECMG category (inherit missing fields from current base or initialBase)
+            var refBase = active || initialBase;
+            var bVisM = parseTafVisib(f.visib);
+            if (bVisM === null && refBase) bVisM = parseTafVisib(refBase.visib);
+            var bCeil = tafCeiling(f.clouds);
+            if (bCeil === null && refBase) bCeil = tafCeiling(refBase.clouds);
+            var bCat = calcFlightCat(bCeil, bVisM);
+            var refVisM = refBase ? parseTafVisib(refBase.visib) : null;
+            var refCeil = refBase ? tafCeiling(refBase.clouds) : null;
+            var refCat = calcFlightCat(refCeil, refVisM);
+            if (catOrder.indexOf(bCat) > catOrder.indexOf(refCat)) {
+              // Deterioration — apply from start (rule d.1)
+              active = f;
+            }
+            // Improvement — keep current base, BECMG applies at becEnd (rule d.2)
+          }
+        } else {
+          // FM or initial forecast
           if (!f.fcstChange) initialBase = f;
           active = f;
         }
@@ -1274,26 +1310,32 @@
       var wgst = active.wgst != null ? active.wgst : (initialBase && initialBase !== active ? initialBase.wgst : null);
       var wxStr = active.wxString || (initialBase && initialBase !== active ? initialBase.wxString : null) || '';
 
-      // Apply TEMPO, PROB, and transitioning BECMG overlays — use worst-case category and wind
+      // Apply TEMPO/PROB overlays per AMC1 NCO.OP.160 rules (e) and (f)
       for (var i = 0; i < fcsts.length; i++) {
         var f = fcsts[i];
-        var isTempo = f.fcstChange === 'TEMPO' || f.fcstChange === 'PROB';
-        var becEnd = f.fcstChange === 'BECMG' ? (f.timeBec || f.timeTo) : null;
-        var isBecmgTransition = f.fcstChange === 'BECMG' && becEnd && epoch < becEnd;
-        if (!isTempo && !isBecmgTransition) continue;
+        if (f.fcstChange !== 'TEMPO' && f.fcstChange !== 'PROB') continue;
         if (f.timeFrom > epoch || (f.timeTo && f.timeTo <= epoch)) continue;
 
+        // Rule (f): PROB30/40 TEMPO → disregard entirely
+        if (f.fcstChange === 'TEMPO' && f.probability >= 30) continue;
+
+        // Rule (e): standalone TEMPO or PROB30/40
         var tVisM = parseTafVisib(f.visib);
         if (tVisM === null) tVisM = visM;
         var tCeiling = tafCeiling(f.clouds);
         if (tCeiling === null) tCeiling = ceiling;
         var tCat = calcFlightCat(tCeiling, tVisM);
 
-        if (catOrder.indexOf(tCat) > catOrder.indexOf(cat)) {
-          cat = tCat;
-          ceiling = tCeiling;
-          visM = tVisM;
-        }
+        // Rule (e.3): improvement → disregard
+        if (catOrder.indexOf(tCat) <= catOrder.indexOf(cat)) continue;
+
+        // Rule (e.2): transient/showery only (TS, SH without persistent) → may ignore
+        if (!isPersistentWx(f.wxString)) continue;
+
+        // Persistent deterioration → apply (rule e.1)
+        cat = tCat;
+        ceiling = tCeiling;
+        visM = tVisM;
 
         // Worst-case wind from overlays
         if (f.wspd != null && (wspd === null || f.wspd > wspd)) wspd = f.wspd;
@@ -1302,7 +1344,26 @@
         if (f.wxString) wxStr = wxStr ? wxStr + ' ' + f.wxString : f.wxString;
       }
 
-      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wspd: wspd, wgst: wgst, wxStr: wxStr });
+      // Compute worst-case TEMPO category across all TEMPO/PROB overlays (unfiltered)
+      // This is for display purposes — shows pilots what TEMPOs forecast even if AMC1 rules filter them
+      var tempoCat = null;
+      for (var i = 0; i < fcsts.length; i++) {
+        var f = fcsts[i];
+        if (f.fcstChange !== 'TEMPO' && f.fcstChange !== 'PROB') continue;
+        if (f.timeFrom > epoch || (f.timeTo && f.timeTo <= epoch)) continue;
+        var tVisM = parseTafVisib(f.visib);
+        if (tVisM === null) tVisM = visM;
+        var tCeiling = tafCeiling(f.clouds);
+        if (tCeiling === null) tCeiling = ceiling;
+        var tCat = calcFlightCat(tCeiling, tVisM);
+        if (catOrder.indexOf(tCat) > catOrder.indexOf(cat)) {
+          if (!tempoCat || catOrder.indexOf(tCat) > catOrder.indexOf(tempoCat)) {
+            tempoCat = tCat;
+          }
+        }
+      }
+
+      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wspd: wspd, wgst: wgst, wxStr: wxStr, tempoCat: tempoCat });
     }
 
     return hours;
@@ -1355,6 +1416,23 @@
       html += '<td><div class="taf-hour" style="background:' + catCfg.color + ';">' + letter + '</div></td>';
     }
     html += '</tr>';
+    // TEMPO row — show worst-case TEMPO category when worse than base TAF
+    var hasAnyTempo = hours.some(function (h) { return h.cat && h.tempoCat; });
+    if (hasAnyTempo) {
+      html += '<tr class="taf-row-tempo"><td class="taf-row-label">TMP</td>';
+      for (var i = 0; i < hours.length; i++) {
+        var h = hours[i];
+        if (!h.cat) continue;
+        if (h.tempoCat) {
+          var tCatCfg = METAR_CAT[h.tempoCat] || { color: '#888' };
+          var tLetter = METAR_LETTER[h.tempoCat] || '?';
+          html += '<td><div class="taf-hour taf-hour-tempo" style="background:' + tCatCfg.color + ';">' + tLetter + '</div></td>';
+        } else {
+          html += '<td></td>';
+        }
+      }
+      html += '</tr>';
+    }
     // Ceiling row
     html += '<tr class="taf-row-data"><td class="taf-row-label">CIG</td>';
     for (var i = 0; i < hours.length; i++) {
@@ -2028,6 +2106,7 @@
   window.AirportApp.calcFlightCat = calcFlightCat;
   window.AirportApp.parseTafVisib = parseTafVisib;
   window.AirportApp.tafCeiling = tafCeiling;
+  window.AirportApp.isPersistentWx = isPersistentWx;
   window.AirportApp.metarCache = metarCache;
   window.AirportApp.metarCacheTime = metarCacheTime;
   window.AirportApp.tafCacheTime = tafCacheTime;

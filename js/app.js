@@ -2017,11 +2017,6 @@
     overlays['R/D/P Areas'] = airspaceVectorLayer;
     setupAirspaceLayer(airspaceVectorLayer);
 
-    // Navaids + VFR Reporting Points overlay (OpenAIP)
-    var waypointsLayer = L.layerGroup();
-    overlays['Reporting Points'] = waypointsLayer;
-    setupWaypointsLayer(waypointsLayer);
-
     // Finnish ACC Sectors overlay (from AIP Finland ENR 6.1-5, 26 JAN 2023)
     var accLayer = L.layerGroup();
     overlays['ACC Sectors'] = accLayer;
@@ -2030,6 +2025,11 @@
     var ifrPointsLayer = L.layerGroup();
     overlays['IFR Points'] = ifrPointsLayer;
     setupIfrPointsLayer(ifrPointsLayer);
+
+    // Navaids + VFR Reporting Points overlay (OpenAIP)
+    var waypointsLayer = L.layerGroup();
+    overlays['VFR Points'] = waypointsLayer;
+    setupWaypointsLayer(waypointsLayer);
 
     // Airport layers will be added by airports.js via window.AirportApp
     window.AirportApp = window.AirportApp || {};

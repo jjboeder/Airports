@@ -224,14 +224,20 @@ html, body {
 .ifr-point-marker { background: none !important; border: none !important; }
 .ifr-point-icon {
   width: 8px; height: 8px;
-  background: #8e44ad;
+  background: #999;
   transform: rotate(45deg);
   position: absolute; top: 1px; left: 1px;
 }
 .ifr-point-label {
-  font-size: 9px;
-  font-weight: 600;
-  color: #8e44ad;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #333;
+  text-shadow:
+    -1px -1px 0 #fff,
+     1px -1px 0 #fff,
+    -1px  1px 0 #fff,
+     1px  1px 0 #fff;
   margin-left: 14px;
   white-space: nowrap;
 }
@@ -475,6 +481,13 @@ html, body {
   align-items: center;
   justify-content: center;
   margin: 0 auto;
+}
+
+.taf-hour-tempo {
+  height: 14px;
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.7;
 }
 
 .taf-td-data {
