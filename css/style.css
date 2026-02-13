@@ -1619,7 +1619,8 @@ html, body {
 #route-flight-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   margin-top: 8px;
   font-size: 11px;
 }

@@ -830,40 +830,71 @@
     return null;
   }
 
-  // Get radio sectors along a leg: CTR/TMA (altitude-aware) + ACC (outside CTR/TMA)
+  // Find a specific frequency type from an airport waypoint
+  // types: array of type keywords to match, in priority order
+  function findAptFreq(wp, types) {
+    var freqs = getAirportFreqs(wp);
+    for (var ti = 0; ti < types.length; ti++) {
+      for (var fi = 0; fi < freqs.length; fi++) {
+        if ((freqs[fi][0] || '').toUpperCase().indexOf(types[ti]) >= 0) return freqs[fi];
+      }
+    }
+    return null;
+  }
+
+  // Get route climb/descent parameters (cached per recalculate cycle)
+  function getRoutePhases() {
+    if (waypoints.length < 2 || legs.length === 0) return null;
+    var cruiseFt = getFL() * 100;
+    var totalDist = 0;
+    for (var i = 0; i < legs.length; i++) totalDist += legs[i].dist;
+    if (totalDist === 0) return null;
+
+    var depElev = 0;
+    if (waypoints[0] && waypoints[0].data && waypoints[0].data[5]) {
+      depElev = parseFloat(waypoints[0].data[5]) || 0;
+    }
+    var arrIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
+    var arrElev = 0;
+    if (arrIdx >= 0 && waypoints[arrIdx] && waypoints[arrIdx].data && waypoints[arrIdx].data[5]) {
+      arrElev = parseFloat(waypoints[arrIdx].data[5]) || 0;
+    }
+
+    var climbDist = Math.max(0, cruiseFt - depElev) / CLIMB_FT_PER_NM;
+    var descentDist = Math.max(0, cruiseFt - arrElev) / DESCENT_FT_PER_NM;
+    if (climbDist + descentDist > totalDist) {
+      var scale = totalDist / (climbDist + descentDist);
+      climbDist *= scale;
+      descentDist *= scale;
+    }
+
+    return {
+      totalDist: totalDist,
+      depElev: depElev,
+      arrElev: arrElev,
+      climbDist: climbDist,
+      descentDist: descentDist,
+      depWp: waypoints[0],
+      arrWp: waypoints[arrIdx]
+    };
+  }
+
+  // Get radio sectors along a leg: departure/arrival phases + CTR/TMA + ACC
   // startDist = cumulative nm from departure at leg start, legDist = leg distance in nm
   function getLegRadioSectors(lat1, lng1, lat2, lng2, startDist, legDist) {
     var sectors = [];
     var seen = {};
-    var steps = 5;
+    var steps = 10;
     for (var s = 0; s <= steps; s++) {
       var t = s / steps;
       var lat = lat1 + (lat2 - lat1) * t;
       var lng = lng1 + (lng2 - lng1) * t;
-      var altFt = routeAltAtDist(startDist + t * legDist);
-      // Check CTR/TMA first
-      var ctrTma = getCtrTmaAtPoint(lat, lng, altFt);
-      var inCtrTma = false;
-      for (var c = 0; c < ctrTma.length; c++) {
-        var a = ctrTma[c];
-        var f0 = a.frequencies[0];
-        var label = f0.name || a.name;
-        var key = label + '|' + f0.value;
-        if (!seen[key]) {
-          seen[key] = true;
-          var TYPE_LABELS = { 4: 'CTR', 7: 'TMA', 26: 'CTA', 28: 'RMZ' };
-          var typeLbl = TYPE_LABELS[a.type] || 'TMA';
-          sectors.push({ name: label, freq: f0.value, phase: typeLbl });
-        }
-        inCtrTma = true;
-      }
-      // ACC sector only if not inside CTR/TMA at this altitude
-      if (!inCtrTma) {
-        var sec = getAccSector(lat, lng);
-        if (sec && !seen[sec.name]) {
-          seen[sec.name] = true;
-          sectors.push({ name: sec.name, freq: sec.freq, phase: 'ACC' });
-        }
+      var distFromDep = startDist + t * legDist;
+      var altFt = routeAltAtDist(distFromDep);
+      var info = radioKeyAtPoint(lat, lng, altFt, distFromDep);
+      if (info && !seen[info.key]) {
+        seen[info.key] = true;
+        sectors.push({ name: info.label, freq: info.freq, phase: info.phase });
       }
     }
     return sectors;
@@ -1355,15 +1386,45 @@
   }
 
   // Identify the active radio key at a point (CTR/TMA name|freq or ACC name)
-  function radioKeyAtPoint(lat, lng, altFt) {
+  function radioKeyAtPoint(lat, lng, altFt, distFromDep) {
+    var phases = getRoutePhases();
+    if (phases && distFromDep != null) {
+      var distFromArr = phases.totalDist - distFromDep;
+
+      // Departure phase: climbing
+      if (distFromDep < phases.climbDist) {
+        var agl = altFt - phases.depElev;
+        if (agl < 2000) {
+          var f = findAptFreq(phases.depWp, ['TWR', 'TOWER', 'AFIS', 'A/G']);
+          if (f) return { key: 'DEP_TWR|' + f[1], label: phases.depWp.code + ' ' + f[0], freq: String(f[1]), phase: 'TWR' };
+        } else {
+          var f = findAptFreq(phases.depWp, ['RADAR', 'APP', 'APPROACH', 'DEP', 'DEPARTURE']);
+          if (f) return { key: 'DEP_APP|' + f[1], label: phases.depWp.code + ' ' + f[0], freq: String(f[1]), phase: 'DEP' };
+        }
+      }
+
+      // Arrival phase: descending
+      if (distFromArr < phases.descentDist) {
+        if (distFromArr < 5) {
+          var f = findAptFreq(phases.arrWp, ['TWR', 'TOWER', 'AFIS', 'A/G']);
+          if (f) return { key: 'ARR_TWR|' + f[1], label: phases.arrWp.code + ' ' + f[0], freq: String(f[1]), phase: 'TWR' };
+        } else {
+          var f = findAptFreq(phases.arrWp, ['RADAR', 'APP', 'APPROACH', 'ARR']);
+          if (f) return { key: 'ARR_APP|' + f[1], label: phases.arrWp.code + ' ' + f[0], freq: String(f[1]), phase: 'APP' };
+        }
+      }
+    }
+
+    // Cruise phase: CTR/TMA or ACC sector
     var ctrTma = getCtrTmaAtPoint(lat, lng, altFt);
     if (ctrTma.length > 0) {
       var a = ctrTma[0];
       var f0 = a.frequencies[0];
-      return { key: (f0.name || a.name) + '|' + f0.value, label: f0.name || a.name, freq: f0.value };
+      var TYPE_LABELS = { 4: 'CTR', 7: 'TMA', 26: 'CTA', 28: 'RMZ' };
+      return { key: (f0.name || a.name) + '|' + f0.value, label: f0.name || a.name, freq: String(f0.value), phase: TYPE_LABELS[a.type] || 'TMA' };
     }
     var sec = getAccSector(lat, lng);
-    if (sec) return { key: sec.name + '|' + sec.freq, label: sec.name, freq: sec.freq };
+    if (sec) return { key: sec.name + '|' + sec.freq, label: sec.name, freq: String(sec.freq), phase: 'ACC' };
     return null;
   }
 
@@ -1382,15 +1443,16 @@
       var legStart = cumD[i];
       var STEPS = 30;
       var prevAlt = routeAltAtDist(legStart);
-      var prevInfo = radioKeyAtPoint(a.lat, a.lng, prevAlt);
+      var prevInfo = radioKeyAtPoint(a.lat, a.lng, prevAlt, legStart);
       var prevKey = prevInfo ? prevInfo.key : null;
 
       for (var s = 1; s <= STEPS; s++) {
         var t = s / STEPS;
         var lat = a.lat + (b.lat - a.lat) * t;
         var lng = a.lng + (b.lng - a.lng) * t;
-        var sampleAlt = routeAltAtDist(legStart + t * legDist);
-        var info = radioKeyAtPoint(lat, lng, sampleAlt);
+        var distFromDep = legStart + t * legDist;
+        var sampleAlt = routeAltAtDist(distFromDep);
+        var info = radioKeyAtPoint(lat, lng, sampleAlt, distFromDep);
         var curKey = info ? info.key : null;
 
         if (curKey && curKey !== prevKey && !seen[curKey]) {
@@ -1401,8 +1463,9 @@
             var tMid = (tLow + tHigh) / 2;
             var mLat = a.lat + (b.lat - a.lat) * tMid;
             var mLng = a.lng + (b.lng - a.lng) * tMid;
-            var midAlt = routeAltAtDist(legStart + tMid * legDist);
-            var mInfo = radioKeyAtPoint(mLat, mLng, midAlt);
+            var midDist = legStart + tMid * legDist;
+            var midAlt = routeAltAtDist(midDist);
+            var mInfo = radioKeyAtPoint(mLat, mLng, midAlt, midDist);
             var mKey = mInfo ? mInfo.key : null;
             if (mKey === curKey) tHigh = tMid;
             else tLow = tMid;
@@ -3359,21 +3422,7 @@
       // --- Build Radio Frequencies table ---
       var freqRows = '';
       if (waypoints.length >= 2) {
-        // Departure airport
-        var depWp = waypoints[0];
-        var depFreqs = getRelevantFreqs(depWp);
-        if (depFreqs.length > 0) {
-          freqRows += '<tr class="freq-airport"><td class="freq-phase">DEP</td>';
-          freqRows += '<td class="freq-loc">' + esc(depWp.code) + '</td>';
-          freqRows += '<td class="freq-list">';
-          for (var fi = 0; fi < depFreqs.length; fi++) {
-            freqRows += esc(depFreqs[fi][0]) + ' <strong>' + esc(String(depFreqs[fi][1])) + '</strong>';
-            if (fi < depFreqs.length - 1) freqRows += ' &nbsp; ';
-          }
-          freqRows += '</td></tr>';
-        }
-
-        // CTR/TMA + ACC sectors along each leg in order (altitude-aware)
+        // All radio sectors along route (includes departure/arrival phases, CTR/TMA, ACC)
         var printCumD = getCumDists();
         var seenRadio = {};
         for (var li = 0; li < legs.length; li++) {
@@ -3386,26 +3435,13 @@
             var key = sec.name + '|' + sec.freq;
             if (seenRadio[key]) continue;
             seenRadio[key] = true;
-            var cls = sec.phase === 'ACC' ? 'freq-acc' : 'freq-ctr';
+            var cls = (sec.phase === 'ACC') ? 'freq-acc'
+              : (sec.phase === 'TWR' || sec.phase === 'DEP' || sec.phase === 'APP') ? 'freq-airport'
+              : 'freq-ctr';
             freqRows += '<tr class="' + cls + '"><td class="freq-phase">' + esc(sec.phase) + '</td>';
             freqRows += '<td class="freq-loc">' + esc(sec.name) + '</td>';
-            freqRows += '<td class="freq-list"><strong>' + esc(sec.freq) + '</strong></td></tr>';
+            freqRows += '<td class="freq-list"><strong>' + esc(String(sec.freq)) + '</strong></td></tr>';
           }
-        }
-
-        // Arrival airport
-        var lastIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
-        var arrWp = waypoints[lastIdx];
-        var arrFreqs = getRelevantFreqs(arrWp);
-        if (arrFreqs.length > 0) {
-          freqRows += '<tr class="freq-airport"><td class="freq-phase">ARR</td>';
-          freqRows += '<td class="freq-loc">' + esc(arrWp.code) + '</td>';
-          freqRows += '<td class="freq-list">';
-          for (var fi = 0; fi < arrFreqs.length; fi++) {
-            freqRows += esc(arrFreqs[fi][0]) + ' <strong>' + esc(String(arrFreqs[fi][1])) + '</strong>';
-            if (fi < arrFreqs.length - 1) freqRows += ' &nbsp; ';
-          }
-          freqRows += '</td></tr>';
         }
 
         // Alternate airport (if set)
@@ -5059,6 +5095,15 @@
       wxShowCb.addEventListener('change', function () {
         if (wxShowCb.checked) {
           if (routeWxMarkers && !map.hasLayer(routeWxMarkers)) map.addLayer(routeWxMarkers);
+          // If overlay data not yet populated, fetch it now
+          if (routeWxOverlay.length === 0 && waypoints.length >= 2) {
+            var samples = buildRouteAirgramSamples();
+            if (samples.length > 0 && window.AirportApp.fetchRouteAirgramData) {
+              window.AirportApp.fetchRouteAirgramData(samples, function (responses) {
+                if (responses) extractRouteWxOverlay(responses, samples);
+              });
+            }
+          }
           renderRouteWxOnMap();
         } else {
           if (routeWxMarkers && map.hasLayer(routeWxMarkers)) map.removeLayer(routeWxMarkers);

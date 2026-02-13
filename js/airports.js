@@ -686,7 +686,7 @@
   function showAipLink(linkEl, icao, data) {
     var doc = findAipDoc(icao, data);
     if (doc) {
-      linkEl.href = OWM_PROXY + '/ar/airport-doc/' + (doc.docid || doc.id);
+      linkEl.href = OWM_PROXY + '/ar/airport-doc/' + (doc.docid || doc.id) + '?icao=' + encodeURIComponent(icao);
       linkEl.style.display = '';
     }
   }
@@ -726,7 +726,7 @@
         var title = shortenHeading(doc.heading || doc.filename || '', icao);
         var size = formatFileSize(doc.filesize || 0);
         html += '<a href="' + OWM_PROXY + '/ar/airport-doc/' + (doc.docid || doc.id)
-          + '" target="_blank" rel="noopener" class="charts-doc">'
+          + '?icao=' + encodeURIComponent(icao) + '" target="_blank" rel="noopener" class="charts-doc">'
           + '<span class="charts-doc-name">' + escapeHtml(title) + '</span>'
           + '<span class="charts-doc-size">' + size + '</span></a>';
       }

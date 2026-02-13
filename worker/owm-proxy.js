@@ -410,15 +410,29 @@ export default {
     }
 
     // Route: /ar/airport-doc/:id (GET) — single document PDF
+    // Optional ?icao=XXXX query param for fallback to package PDF if /pams/id/ returns 404
     const arDocMatch = path.match(/^\/ar\/airport-doc\/([a-zA-Z0-9_-]+)$/);
     if (arDocMatch && request.method === 'GET') {
       const docId = arDocMatch[1];
+      const fallbackIcao = url.searchParams.get('icao');
       try {
         const token = await getArToken(env);
         const resp = await fetch(`https://api.autorouter.aero/v1.0/pams/id/${docId}`, {
           headers: { 'Authorization': 'Bearer ' + token }
         });
         if (!resp.ok) {
+          // Fallback: if ICAO provided and individual doc not found, serve the package PDF
+          if (resp.status === 404 && fallbackIcao && /^[A-Z]{4}$/.test(fallbackIcao)) {
+            const pkgResp = await fetch(`https://api.autorouter.aero/v1.0/pams/airport/${fallbackIcao}/package`, {
+              headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (pkgResp.ok) {
+              const headers = new Headers(pkgResp.headers);
+              Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+              headers.set('Content-Disposition', `inline; filename="${fallbackIcao}_charts.pdf"`);
+              return new Response(pkgResp.body, { status: 200, headers });
+            }
+          }
           const errBody = await resp.text();
           return new Response(errBody, { status: resp.status, headers: corsHeaders(request) });
         }
