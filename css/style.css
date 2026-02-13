@@ -1730,6 +1730,17 @@ html, body {
   height: 10px;
 }
 
+.taf-ws-dot {
+  color: #e74c3c;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ws-svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* Icing indicator badges */
 .ice-badge {
   display: inline-flex;

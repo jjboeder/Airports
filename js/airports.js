@@ -58,9 +58,41 @@
   function isStrongWind(wspd, wgst) {
     return (wspd != null && wspd > 15) || (wgst != null && wgst > 20);
   }
+  function windTitle(wdir, wspd, wgst) {
+    var s = '';
+    if (wdir != null) s += (wdir === 'VRB' ? 'VRB' : wdir + '\u00B0');
+    if (wspd != null) s += (s ? '/' : '') + wspd + 'kt';
+    if (wgst) s += ' G' + wgst + 'kt';
+    return s;
+  }
 
   // Inline SVG wind icon (two flowing lines with curls)
   var WIND_SVG = '<svg class="wind-svg" viewBox="0 0 24 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M1 4h11a3 3 0 1 0-3-3"/><path d="M1 10h15a3 3 0 1 1-3 3"/></svg>';
+
+  // Inline SVG wind shear icon (zigzag arrow)
+  var WS_SVG = '<svg class="ws-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,12 5,4 8,10 11,2"/><polyline points="9,2 11,2 11,4"/></svg>';
+
+  // Detect wind shear between base wind and a TEMPO/PROB overlay
+  // Returns description string or null if no significant shear
+  function detectWindShear(baseDir, baseSpd, tempoDir, tempoSpd, tempoGst) {
+    if (baseSpd == null && tempoSpd == null) return null;
+    var bs = baseSpd || 0;
+    var ts = tempoSpd || 0;
+    // Speed shear: difference >= 10kt
+    var spdDelta = Math.abs(ts - bs);
+    // Direction shear: >= 60° with at least 8kt on both sides
+    var dirDelta = 0;
+    if (baseDir != null && tempoDir != null && baseDir !== 'VRB' && tempoDir !== 'VRB' && bs >= 8 && ts >= 8) {
+      dirDelta = Math.abs(tempoDir - baseDir);
+      if (dirDelta > 180) dirDelta = 360 - dirDelta;
+    }
+    // Gust shear: gusts exceed sustained by >= 15kt
+    var gustDelta = (tempoGst && ts) ? tempoGst - ts : 0;
+    if (spdDelta >= 10 || dirDelta >= 60 || gustDelta >= 15) {
+      return windTitle(baseDir, baseSpd, null) + ' \u2192 ' + windTitle(tempoDir, tempoSpd, tempoGst);
+    }
+    return null;
+  }
 
   // Inline SVG ice crystal icon
   var ICE_SVG = '<svg class="ice-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="1" x2="8" y2="15"/><line x1="1" y1="8" x2="15" y2="8"/><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/><line x1="8" y1="1" x2="6" y2="3"/><line x1="8" y1="1" x2="10" y2="3"/><line x1="8" y1="15" x2="6" y2="13"/><line x1="8" y1="15" x2="10" y2="13"/></svg>';
@@ -1006,7 +1038,7 @@
     if (metarAge) html += '<div class="data-age-wrap">' + metarAge + '</div>';
     html += '<span class="metar-cat" style="background:' + cat.color + ';">' + cat.label + '</span>';
     if (isStrongWind(metar.wspd, metar.wgst)) {
-      html += ' <span class="wind-badge">' + WIND_SVG + '</span>';
+      html += ' <span class="wind-badge" title="' + escapeHtml(windTitle(metar.wdir, metar.wspd, metar.wgst)) + '">' + WIND_SVG + '</span>';
     }
     if (isIcingRisk(metar)) {
       html += ' <span class="ice-badge">' + ICE_SVG + '</span>';
@@ -1472,6 +1504,7 @@
       var cat = calcFlightCat(ceiling, visM);
 
       // Extract wind and weather from active forecast
+      var wdir = active.wdir != null ? active.wdir : (initialBase && initialBase !== active ? initialBase.wdir : null);
       var wspd = active.wspd != null ? active.wspd : (initialBase && initialBase !== active ? initialBase.wspd : null);
       var wgst = active.wgst != null ? active.wgst : (initialBase && initialBase !== active ? initialBase.wgst : null);
       var wxStr = active.wxString || (initialBase && initialBase !== active ? initialBase.wxString : null) || '';
@@ -1511,11 +1544,12 @@
       }
 
       // Compute worst-case TEMPO category/ceiling/vis across all TEMPO/PROB overlays (unfiltered)
-      // Also collect all weather strings from active overlays and base forecast
+      // Also collect all weather strings and detect wind shear from active overlays
       var tempoCat = null;
       var tempoCeiling = null;
       var tempoVisM = null;
       var allWx = [];
+      var wsDesc = null; // wind shear description (first detected)
       if (wxStr) allWx.push(wxStr);
       for (var i = 0; i < fcsts.length; i++) {
         var f = fcsts[i];
@@ -1534,6 +1568,10 @@
             tempoVisM = tVisM;
           }
         }
+        // Wind shear: compare base wind with TEMPO wind
+        if (!wsDesc && (f.wspd != null || f.wdir != null)) {
+          wsDesc = detectWindShear(wdir, wspd, f.wdir != null ? f.wdir : wdir, f.wspd != null ? f.wspd : wspd, f.wgst);
+        }
       }
       // Deduplicate and join all weather phenomena
       var wxPhenomena = [];
@@ -1545,7 +1583,7 @@
       }
       var combinedWx = wxPhenomena.join(' ');
 
-      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wspd: wspd, wgst: wgst, wxStr: combinedWx, tempoCat: tempoCat, tempoCeiling: tempoCeiling, tempoVisM: tempoVisM });
+      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wdir: wdir, wspd: wspd, wgst: wgst, wxStr: combinedWx, tempoCat: tempoCat, tempoCeiling: tempoCeiling, tempoVisM: tempoVisM, wsDesc: wsDesc });
     }
 
     return hours;
@@ -1666,7 +1704,21 @@
       for (var i = 0; i < hours.length; i++) {
         if (!hours[i].cat) continue;
         if (isStrongWind(hours[i].wspd, hours[i].wgst)) {
-          html += '<td class="taf-td-data"><span class="taf-wind-dot">' + WIND_SVG + '</span></td>';
+          html += '<td class="taf-td-data"><span class="taf-wind-dot" title="' + escapeHtml(windTitle(hours[i].wdir, hours[i].wspd, hours[i].wgst)) + '">' + WIND_SVG + '</span></td>';
+        } else {
+          html += '<td class="taf-td-data"></td>';
+        }
+      }
+      html += '</tr>';
+    }
+    // Wind shear row
+    var hasAnyWS = hours.some(function (h) { return h.cat && h.wsDesc; });
+    if (hasAnyWS) {
+      html += '<tr class="taf-row-data"><td class="taf-row-label">WS</td>';
+      for (var i = 0; i < hours.length; i++) {
+        if (!hours[i].cat) continue;
+        if (hours[i].wsDesc) {
+          html += '<td class="taf-td-data"><span class="taf-ws-dot" title="' + escapeHtml(hours[i].wsDesc) + '">' + WS_SVG + '</span></td>';
         } else {
           html += '<td class="taf-td-data"></td>';
         }
