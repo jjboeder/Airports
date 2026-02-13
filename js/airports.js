@@ -755,6 +755,55 @@
   }
 
   // --- OpenAIP popup enrichment ---
+
+  // Map OpenAIP frequency name to short label
+  var OAIP_FREQ_TYPE_MAP = { 0: 'APP', 1: 'APRON', 5: 'DEL', 9: 'GND', 13: 'RADAR', 14: 'TWR', 15: 'ATIS', 17: 'TWR' };
+  function oaipFreqLabel(f) {
+    var name = (f.name || '').toUpperCase();
+    if (name.indexOf('TOWER') >= 0) return 'TWR';
+    if (name.indexOf('GROUND') >= 0 || name.indexOf('GND') >= 0) return 'GND';
+    if (name.indexOf('DELIVERY') >= 0 || name.indexOf('CLNC') >= 0) return 'DEL';
+    if (name.indexOf('ATIS') >= 0) return 'ATIS';
+    if (name.indexOf('RADAR') >= 0) return 'RADAR';
+    if (name.indexOf('APPROACH') >= 0 || name.indexOf(' APP') >= 0) return 'APP';
+    if (name.indexOf('DEPARTURE') >= 0 || name.indexOf(' DEP') >= 0) return 'DEP';
+    if (name.indexOf('AFIS') >= 0) return 'AFIS';
+    if (name.indexOf('APRON') >= 0) return 'APRON';
+    if (name.indexOf('INFO') >= 0) return 'INFO';
+    return OAIP_FREQ_TYPE_MAP[f.type] || f.name || 'COMM';
+  }
+
+  // Update marker frequency data from OpenAIP (no popup needed)
+  function enrichFreqsFromOpenAip(icao, data) {
+    var oaipFreqs = data && data.frequencies;
+    if (!oaipFreqs || oaipFreqs.length === 0) return;
+    var newFreqs = [];
+    for (var i = 0; i < oaipFreqs.length; i++) {
+      newFreqs.push([oaipFreqLabel(oaipFreqs[i]), oaipFreqs[i].value]);
+    }
+    var app = window.AirportApp;
+    var marker = app && app.markersByIcao && app.markersByIcao[icao];
+    if (marker && marker._airportData) {
+      marker._airportData[COL.frequencies] = newFreqs;
+    }
+  }
+
+  // Fetch OpenAIP data for an airport and update marker frequencies (headless, no popup)
+  function fetchOpenAipFreqs(icao) {
+    var cached = openaipCache[icao];
+    if (cached && (Date.now() - cached.time < OPENAIP_CACHE_AGE)) {
+      if (cached.data) enrichFreqsFromOpenAip(icao, cached.data);
+      return;
+    }
+    fetch(OWM_PROXY + '/airport?icao=' + encodeURIComponent(icao))
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        openaipCache[icao] = { data: data, time: Date.now() };
+        if (data) enrichFreqsFromOpenAip(icao, data);
+      })
+      .catch(function () {});
+  }
+
   function fetchOpenAipForPopup(popupEl, icao) {
     var cached = openaipCache[icao];
     if (cached && (Date.now() - cached.time < OPENAIP_CACHE_AGE)) {
@@ -773,6 +822,46 @@
   function enrichInfoTab(popupEl, icao, data) {
     var infoGrid = popupEl.querySelector('.popup-info-grid');
     if (!infoGrid) return;
+
+    // 0. Replace frequencies with OpenAIP data (more accurate than OurAirports)
+    var oaipFreqs = data.frequencies;
+    if (oaipFreqs && oaipFreqs.length > 0) {
+      var newFreqs = [];
+      for (var fi = 0; fi < oaipFreqs.length; fi++) {
+        var of = oaipFreqs[fi];
+        newFreqs.push([oaipFreqLabel(of), of.value]);
+      }
+      // Update the marker data so route planner also picks up correct frequencies
+      var app = window.AirportApp;
+      var marker = app && app.markersByIcao && app.markersByIcao[icao];
+      if (marker && marker._airportData) {
+        marker._airportData[COL.frequencies] = newFreqs;
+      }
+      // Update popup freq display
+      var freqRow = infoGrid.querySelector('.info-row-freqs');
+      if (freqRow) {
+        var freqHtml = '<span class="info-label">Freq</span><span class="info-value freq-list">';
+        for (var fi = 0; fi < newFreqs.length; fi++) {
+          freqHtml += '<span class="freq-item">' + escapeHtml(newFreqs[fi][0]) + ' ' + newFreqs[fi][1] + '</span>';
+        }
+        freqHtml += '</span>';
+        freqRow.innerHTML = freqHtml;
+      } else if (newFreqs.length > 0) {
+        // No freq row existed (OurAirports had none) — add one after ATC row
+        var atcRow = infoGrid.querySelector('.info-row');
+        if (atcRow) {
+          var newRow = document.createElement('div');
+          newRow.className = 'info-row info-row-freqs';
+          var freqHtml = '<span class="info-label">Freq</span><span class="info-value freq-list">';
+          for (var fi = 0; fi < newFreqs.length; fi++) {
+            freqHtml += '<span class="freq-item">' + escapeHtml(newFreqs[fi][0]) + ' ' + newFreqs[fi][1] + '</span>';
+          }
+          freqHtml += '</span>';
+          newRow.innerHTML = freqHtml;
+          atcRow.insertAdjacentElement('afterend', newRow);
+        }
+      }
+    }
 
     // Find last existing row as insertion anchor
     var lastRow = null;
@@ -2250,6 +2339,7 @@
   window.AirportApp.parseNotamResponse = parseNotamResponse;
   window.AirportApp.isNotamStale = isNotamStale;
   window.AirportApp.rawTafCache = rawTafCache;
+  window.AirportApp.fetchOpenAipFreqs = fetchOpenAipFreqs;
 
   if (window.AirportApp.map && window.AirportApp.layerControl) {
     loadAirports();

@@ -1003,6 +1003,8 @@
       if (!name && data) name = getName(data);
     }
     waypoints.push({ latlng: latlng, data: data, code: code, name: name || code });
+    // Fetch OpenAIP frequencies for airport waypoints (more accurate than OurAirports)
+    if (code && app && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(code);
     recalculate();
     renderRouteOnMap();
     renderPanel();
@@ -1059,6 +1061,9 @@
         name: getName(airportData)
       });
     }
+    // Fetch OpenAIP frequencies for airport waypoint
+    var app = window.AirportApp;
+    if (code && app && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(code);
     recalculate();
     renderRouteOnMap();
     renderPanel();
@@ -3422,9 +3427,19 @@
       // --- Build Radio Frequencies table ---
       var freqRows = '';
       if (waypoints.length >= 2) {
-        // All radio sectors along route (includes departure/arrival phases, CTR/TMA, ACC)
         var printCumD = getCumDists();
         var seenRadio = {};
+        var arrIdx = alternateIndex >= 0 ? alternateIndex - 1 : waypoints.length - 1;
+
+        // Departure ATIS
+        var depAtis = findAptFreq(waypoints[0], ['ATIS']);
+        if (depAtis) {
+          freqRows += '<tr class="freq-airport"><td class="freq-phase">ATIS</td>';
+          freqRows += '<td class="freq-loc">' + esc(waypoints[0].code) + '</td>';
+          freqRows += '<td class="freq-list"><strong>' + esc(String(depAtis[1])) + '</strong></td></tr>';
+        }
+
+        // All radio sectors along route (includes departure/arrival phases, CTR/TMA, ACC)
         for (var li = 0; li < legs.length; li++) {
           var sectors = getLegRadioSectors(
             waypoints[li].latlng.lat, waypoints[li].latlng.lng,
@@ -3441,6 +3456,16 @@
             freqRows += '<tr class="' + cls + '"><td class="freq-phase">' + esc(sec.phase) + '</td>';
             freqRows += '<td class="freq-loc">' + esc(sec.name) + '</td>';
             freqRows += '<td class="freq-list"><strong>' + esc(String(sec.freq)) + '</strong></td></tr>';
+          }
+        }
+
+        // Arrival ATIS (if different airport from departure)
+        if (arrIdx >= 0 && arrIdx < waypoints.length) {
+          var arrAtis = findAptFreq(waypoints[arrIdx], ['ATIS']);
+          if (arrAtis && !(waypoints[arrIdx].code === waypoints[0].code && depAtis)) {
+            freqRows += '<tr class="freq-airport"><td class="freq-phase">ATIS</td>';
+            freqRows += '<td class="freq-loc">' + esc(waypoints[arrIdx].code) + '</td>';
+            freqRows += '<td class="freq-list"><strong>' + esc(String(arrAtis[1])) + '</strong></td></tr>';
           }
         }
 
@@ -5003,12 +5028,14 @@
       var latlng = L.latLng(lat, lon);
       var marker = markersByIcao[ident];
       if (marker && marker._airportData) {
+        var arCode = getCode(marker._airportData);
         waypoints.push({
           latlng: latlng,
           data: marker._airportData,
-          code: getCode(marker._airportData),
+          code: arCode,
           name: getName(marker._airportData)
         });
+        if (arCode && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(arCode);
       } else {
         // IFR waypoint from autorouter (fix, VOR, NDB, etc.)
         // autorouter types: ARPT, INT, VOR, VORDME, VORTAC, NDB, NDBDME, DME, TACAN
@@ -5231,12 +5258,16 @@
 
     for (var i = 0; i < state.waypoints.length; i++) {
       var wp = state.waypoints[i];
+      // Re-link to marker data if available (saved data may have stale frequencies)
+      var mkr = app.markersByIcao && app.markersByIcao[wp.code];
+      var wpData = (mkr && mkr._airportData) ? mkr._airportData : wp.data;
       waypoints.push({
         latlng: L.latLng(wp.lat, wp.lng),
-        data: wp.data,
+        data: wpData,
         code: wp.code,
         name: wp.name
       });
+      if (wp.code && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(wp.code);
     }
     if (state.alternateIndex >= 0 && state.alternateIndex < waypoints.length) {
       alternateIndex = state.alternateIndex;
