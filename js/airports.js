@@ -630,6 +630,7 @@
     html += '<button class="popup-extra-tab" data-panel="popup-charts">Charts</button>';
     html += '<button class="popup-extra-tab" data-panel="popup-airgram">Airgram</button>';
     html += '<button class="popup-extra-tab" data-panel="popup-briefing">Briefing</button>';
+    html += '<button class="popup-extra-tab" data-panel="popup-perf">Perf</button>';
     html += '</div>';
 
     // --- Info tab (default open) ---
@@ -686,6 +687,7 @@
     html += '<div class="popup-charts popup-extra-content" data-icao="' + icaoSafe + '" style="display:none;"></div>';
     html += '<div class="popup-airgram popup-extra-content" data-lat="' + lat + '" data-lon="' + lon + '" data-elev="' + (elevation || 0) + '" style="display:none;"></div>';
     html += '<div class="popup-briefing popup-extra-content" data-icao="' + icaoSafe + '" data-name="' + escapeHtml(name) + '" data-elev="' + (elevation || 0) + '" data-lat="' + lat + '" data-lon="' + lon + '" style="display:none;"></div>';
+    html += '<div class="popup-perf popup-extra-content" data-icao="' + icaoSafe + '" data-elev="' + (elevation || 0) + '" data-runways=\'' + escapeHtml(JSON.stringify(runways)) + '\' style="display:none;"></div>';
 
     html += '</div>';
     return html;
@@ -2391,6 +2393,15 @@
                           bDiv.innerHTML = '<div class="briefing-content">Could not load weather data for briefing.</div>';
                         });
                     }
+                  }
+                } else if (target === 'popup-perf') {
+                  var perfDiv = el.querySelector('.popup-perf');
+                  if (perfDiv && window.AirportApp.renderPerfInPopup) {
+                    var pIcao = perfDiv.getAttribute('data-icao');
+                    var pElev = perfDiv.getAttribute('data-elev');
+                    var pRunways = [];
+                    try { pRunways = JSON.parse(perfDiv.getAttribute('data-runways') || '[]'); } catch (e) {}
+                    window.AirportApp.renderPerfInPopup(perfDiv, pIcao, pRunways, pElev);
                   }
                 }
               }
