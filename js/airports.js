@@ -1446,7 +1446,7 @@
     var hours = [];
     var catOrder = ['VFR', 'MVFR', 'BIR', 'IFR', 'LIFR'];
 
-    for (var h = 0; h < 12; h++) {
+    for (var h = 0; h < 15; h++) {
       var t = new Date(now.getTime() + h * 3600000);
       var epoch = t.getTime() / 1000;
       var utcHour = t.getUTCHours();
