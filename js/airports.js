@@ -1442,13 +1442,24 @@
     if (!tafJson || !tafJson.length || !tafJson[0].fcsts || tafJson[0].fcsts.length === 0) return null;
 
     var fcsts = tafJson[0].fcsts;
-    var now = new Date();
     var hours = [];
     var catOrder = ['VFR', 'MVFR', 'BIR', 'IFR', 'LIFR'];
 
-    for (var h = 0; h < 15; h++) {
-      var t = new Date(now.getTime() + h * 3600000);
-      var epoch = t.getTime() / 1000;
+    // Determine TAF validity start (initial forecast timeFrom) and end (latest timeTo)
+    var tafStart = null;
+    var tafEnd = 0;
+    for (var i = 0; i < fcsts.length; i++) {
+      if (!fcsts[i].fcstChange && tafStart === null) tafStart = fcsts[i].timeFrom;
+      if (fcsts[i].timeTo && fcsts[i].timeTo > tafEnd) tafEnd = fcsts[i].timeTo;
+    }
+    if (tafStart === null || tafEnd === 0) return null;
+    var totalHours = Math.ceil((tafEnd - tafStart) / 3600);
+    if (totalHours < 1) totalHours = 1;
+    if (totalHours > 36) totalHours = 36;
+
+    for (var h = 0; h < totalHours; h++) {
+      var epoch = tafStart + h * 3600;
+      var t = new Date(epoch * 1000);
       var utcHour = t.getUTCHours();
 
       // Find active base forecast (AMC1 NCO.OP.160 rules c/d)
@@ -1491,7 +1502,7 @@
       }
 
       if (!active) {
-        hours.push({ utcHour: utcHour, cat: null });
+        hours.push({ epoch: epoch, utcHour: utcHour, cat: null });
         continue;
       }
 
@@ -1583,7 +1594,7 @@
       }
       var combinedWx = wxPhenomena.join(' ');
 
-      hours.push({ utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wdir: wdir, wspd: wspd, wgst: wgst, wxStr: combinedWx, tempoCat: tempoCat, tempoCeiling: tempoCeiling, tempoVisM: tempoVisM, wsDesc: wsDesc });
+      hours.push({ epoch: epoch, utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wdir: wdir, wspd: wspd, wgst: wgst, wxStr: combinedWx, tempoCat: tempoCat, tempoCeiling: tempoCeiling, tempoVisM: tempoVisM, wsDesc: wsDesc });
     }
 
     return hours;
@@ -1603,6 +1614,72 @@
     return (m / 1000).toFixed(1);
   }
 
+  function formatPeriod(startEpoch, endEpoch) {
+    var s = new Date(startEpoch * 1000);
+    var e = new Date(endEpoch * 1000);
+    var sHr = s.getUTCHours();
+    var eHr = e.getUTCHours();
+    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    if (endEpoch - startEpoch <= 3600) {
+      return pad(sHr) + 'Z';
+    }
+    return pad(sHr) + '-' + pad(eHr) + 'Z';
+  }
+
+  function formatPeriodLocal(startEpoch, endEpoch) {
+    var s = new Date(startEpoch * 1000);
+    var e = new Date(endEpoch * 1000);
+    var fmt = function (d) {
+      return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) +
+        ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    };
+    if (endEpoch - startEpoch <= 3600) {
+      return fmt(s);
+    }
+    return fmt(s) + ' \u2013 ' + fmt(e);
+  }
+
+  function groupTafPeriods(hours, mTemp, mDewp) {
+    var groups = [];
+    var current = null;
+    for (var i = 0; i < hours.length; i++) {
+      var h = hours[i];
+      if (!h.cat) continue;
+      var iceRisk = isTafHourIcingRisk(h, mTemp, mDewp);
+      var sig = [
+        h.cat, h.tempoCat || '', h.ceiling, h.visM,
+        h.tempoCeiling, h.tempoVisM,
+        h.wspd, h.wgst, h.wdir,
+        h.wxStr, h.wsDesc || '', iceRisk ? '1' : '0'
+      ].join('|');
+      if (current && current._sig === sig) {
+        current.endEpoch = h.epoch + 3600;
+        current.hours++;
+      } else {
+        current = {
+          _sig: sig,
+          startEpoch: h.epoch,
+          endEpoch: h.epoch + 3600,
+          hours: 1,
+          cat: h.cat,
+          tempoCat: h.tempoCat,
+          ceiling: h.ceiling,
+          visM: h.visM,
+          tempoCeiling: h.tempoCeiling,
+          tempoVisM: h.tempoVisM,
+          wdir: h.wdir,
+          wspd: h.wspd,
+          wgst: h.wgst,
+          wxStr: h.wxStr,
+          wsDesc: h.wsDesc,
+          iceRisk: iceRisk
+        };
+        groups.push(current);
+      }
+    }
+    return groups;
+  }
+
   function renderTafInPopup(el, hours, rawTaf, icao) {
     if (!hours || hours.length === 0) {
       el.innerHTML = '<span class="info-unknown">No TAF available</span>';
@@ -1616,6 +1693,12 @@
       mDewp = metarCache[icao].dewp;
     }
 
+    var groups = groupTafPeriods(hours, mTemp, mDewp);
+    if (!groups || groups.length === 0) {
+      el.innerHTML = '<span class="info-unknown">No TAF available</span>';
+      return;
+    }
+
     var tafIssue = null;
     if (icao && tafCache[icao] && tafCache[icao][0] && tafCache[icao][0].issueTime) {
       tafIssue = new Date(tafCache[icao][0].issueTime).getTime();
@@ -1623,34 +1706,30 @@
     var tafAge = formatAge(tafIssue, 'taf');
     var html = '<div class="taf-header">TAF' + (tafAge ? '<div class="data-age-wrap">' + tafAge + '</div>' : '') + '</div>';
     html += '<table class="taf-table"><tbody>';
-    // Hour row
+    // Time range row
     html += '<tr class="taf-row-hour"><td class="taf-row-label"></td>';
-    for (var i = 0; i < hours.length; i++) {
-      if (!hours[i].cat) continue;
-      var hourStr = hours[i].utcHour < 10 ? '0' + hours[i].utcHour : '' + hours[i].utcHour;
-      html += '<td class="taf-td-label">' + hourStr + 'Z</td>';
+    for (var i = 0; i < groups.length; i++) {
+      html += '<td class="taf-td-label" title="' + escapeHtml(formatPeriodLocal(groups[i].startEpoch, groups[i].endEpoch)) + '">' + formatPeriod(groups[i].startEpoch, groups[i].endEpoch) + '</td>';
     }
     html += '</tr>';
     // Category row
     html += '<tr class="taf-row-cat"><td class="taf-row-label"></td>';
-    for (var i = 0; i < hours.length; i++) {
-      var h = hours[i];
-      if (!h.cat) continue;
-      var catCfg = METAR_CAT[h.cat] || { color: '#888' };
-      var letter = METAR_LETTER[h.cat] || '?';
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      var catCfg = METAR_CAT[g.cat] || { color: '#888' };
+      var letter = METAR_LETTER[g.cat] || '?';
       html += '<td><div class="taf-hour" style="background:' + catCfg.color + ';">' + letter + '</div></td>';
     }
     html += '</tr>';
-    // TEMPO row — show worst-case TEMPO category when worse than base TAF
-    var hasAnyTempo = hours.some(function (h) { return h.cat && h.tempoCat; });
+    // TEMPO row
+    var hasAnyTempo = groups.some(function (g) { return g.tempoCat; });
     if (hasAnyTempo) {
       html += '<tr class="taf-row-tempo"><td class="taf-row-label">TMP</td>';
-      for (var i = 0; i < hours.length; i++) {
-        var h = hours[i];
-        if (!h.cat) continue;
-        if (h.tempoCat) {
-          var tCatCfg = METAR_CAT[h.tempoCat] || { color: '#888' };
-          var tLetter = METAR_LETTER[h.tempoCat] || '?';
+      for (var i = 0; i < groups.length; i++) {
+        var g = groups[i];
+        if (g.tempoCat) {
+          var tCatCfg = METAR_CAT[g.tempoCat] || { color: '#888' };
+          var tLetter = METAR_LETTER[g.tempoCat] || '?';
           html += '<td><div class="taf-hour taf-hour-tempo" style="background:' + tCatCfg.color + ';">' + tLetter + '</div></td>';
         } else {
           html += '<td></td>';
@@ -1658,39 +1737,36 @@
       }
       html += '</tr>';
     }
-    // Ceiling row — show "base/tempo" when TEMPO ceiling differs
+    // Ceiling row
     html += '<tr class="taf-row-data"><td class="taf-row-label">CIG</td>';
-    for (var i = 0; i < hours.length; i++) {
-      var h = hours[i];
-      if (!h.cat) continue;
-      var cigStr = formatCeiling(h.ceiling);
-      if (h.tempoCat && h.tempoCeiling !== h.ceiling) {
-        cigStr += '<span class="taf-tempo-val">/' + formatCeiling(h.tempoCeiling) + '</span>';
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      var cigStr = formatCeiling(g.ceiling);
+      if (g.tempoCat && g.tempoCeiling !== g.ceiling) {
+        cigStr += '<span class="taf-tempo-val">/' + formatCeiling(g.tempoCeiling) + '</span>';
       }
       html += '<td class="taf-td-data">' + cigStr + '</td>';
     }
     html += '</tr>';
-    // Visibility row — show "base/tempo" when TEMPO visibility differs
+    // Visibility row
     html += '<tr class="taf-row-data"><td class="taf-row-label">VIS</td>';
-    for (var i = 0; i < hours.length; i++) {
-      var h = hours[i];
-      if (!h.cat) continue;
-      var visStr = formatVisKm(h.visM);
-      if (h.tempoCat && h.tempoVisM !== h.visM) {
-        visStr += '<span class="taf-tempo-val">/' + formatVisKm(h.tempoVisM) + '</span>';
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      var visStr = formatVisKm(g.visM);
+      if (g.tempoCat && g.tempoVisM !== g.visM) {
+        visStr += '<span class="taf-tempo-val">/' + formatVisKm(g.tempoVisM) + '</span>';
       }
       html += '<td class="taf-td-data">' + visStr + '</td>';
     }
     html += '</tr>';
     // Weather phenomena row
-    var hasAnyWx = hours.some(function (h) { return h.cat && h.wxStr; });
+    var hasAnyWx = groups.some(function (g) { return g.wxStr; });
     if (hasAnyWx) {
       html += '<tr class="taf-row-data"><td class="taf-row-label">WX</td>';
-      for (var i = 0; i < hours.length; i++) {
-        var h = hours[i];
-        if (!h.cat) continue;
-        if (h.wxStr) {
-          html += '<td class="taf-td-data taf-td-wx" title="' + escapeHtml(decodeWxString(h.wxStr)) + '">' + escapeHtml(h.wxStr) + '</td>';
+      for (var i = 0; i < groups.length; i++) {
+        var g = groups[i];
+        if (g.wxStr) {
+          html += '<td class="taf-td-data taf-td-wx" title="' + escapeHtml(decodeWxString(g.wxStr)) + '">' + escapeHtml(g.wxStr) + '</td>';
         } else {
           html += '<td class="taf-td-data"></td>';
         }
@@ -1698,13 +1774,13 @@
       html += '</tr>';
     }
     // Wind row
-    var hasAnyWind = hours.some(function (h) { return h.cat && isStrongWind(h.wspd, h.wgst); });
+    var hasAnyWind = groups.some(function (g) { return isStrongWind(g.wspd, g.wgst); });
     if (hasAnyWind) {
       html += '<tr class="taf-row-data"><td class="taf-row-label">WND</td>';
-      for (var i = 0; i < hours.length; i++) {
-        if (!hours[i].cat) continue;
-        if (isStrongWind(hours[i].wspd, hours[i].wgst)) {
-          html += '<td class="taf-td-data"><span class="taf-wind-dot" title="' + escapeHtml(windTitle(hours[i].wdir, hours[i].wspd, hours[i].wgst)) + '">' + WIND_SVG + '</span></td>';
+      for (var i = 0; i < groups.length; i++) {
+        var g = groups[i];
+        if (isStrongWind(g.wspd, g.wgst)) {
+          html += '<td class="taf-td-data"><span class="taf-wind-dot" title="' + escapeHtml(windTitle(g.wdir, g.wspd, g.wgst)) + '">' + WIND_SVG + '</span></td>';
         } else {
           html += '<td class="taf-td-data"></td>';
         }
@@ -1712,13 +1788,13 @@
       html += '</tr>';
     }
     // Wind shear row
-    var hasAnyWS = hours.some(function (h) { return h.cat && h.wsDesc; });
+    var hasAnyWS = groups.some(function (g) { return g.wsDesc; });
     if (hasAnyWS) {
       html += '<tr class="taf-row-data"><td class="taf-row-label">WS</td>';
-      for (var i = 0; i < hours.length; i++) {
-        if (!hours[i].cat) continue;
-        if (hours[i].wsDesc) {
-          html += '<td class="taf-td-data"><span class="taf-ws-dot" title="' + escapeHtml(hours[i].wsDesc) + '">' + WS_SVG + '</span></td>';
+      for (var i = 0; i < groups.length; i++) {
+        var g = groups[i];
+        if (g.wsDesc) {
+          html += '<td class="taf-td-data"><span class="taf-ws-dot" title="' + escapeHtml(g.wsDesc) + '">' + WS_SVG + '</span></td>';
         } else {
           html += '<td class="taf-td-data"></td>';
         }
@@ -1726,12 +1802,11 @@
       html += '</tr>';
     }
     // Icing row
-    var hasAnyIce = hours.some(function (h) { return h.cat && isTafHourIcingRisk(h, mTemp, mDewp); });
+    var hasAnyIce = groups.some(function (g) { return g.iceRisk; });
     if (hasAnyIce) {
       html += '<tr class="taf-row-data"><td class="taf-row-label">ICE</td>';
-      for (var i = 0; i < hours.length; i++) {
-        if (!hours[i].cat) continue;
-        if (isTafHourIcingRisk(hours[i], mTemp, mDewp)) {
+      for (var i = 0; i < groups.length; i++) {
+        if (groups[i].iceRisk) {
           html += '<td class="taf-td-data"><span class="taf-ice-dot">' + ICE_SVG + '</span></td>';
         } else {
           html += '<td class="taf-td-data"></td>';

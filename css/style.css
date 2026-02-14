@@ -496,10 +496,11 @@ html, body {
 }
 
 .taf-td-label {
-  font-size: 10px;
+  font-size: 9px;
   color: #777;
   font-family: 'SF Mono', 'Menlo', monospace;
   padding: 0 2px 1px !important;
+  white-space: nowrap;
 }
 
 .taf-row-cat td {
@@ -507,7 +508,7 @@ html, body {
 }
 
 .taf-hour {
-  width: 24px;
+  min-width: 24px;
   height: 20px;
   border-radius: 3px;
   color: #fff;
@@ -541,7 +542,7 @@ html, body {
 .taf-td-wx {
   font-size: 8px;
   color: #888;
-  max-width: 28px;
+  max-width: 60px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
