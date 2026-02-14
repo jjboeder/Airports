@@ -475,7 +475,8 @@ html, body {
 }
 
 .taf-table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 4px 2px;
   width: auto;
 }
 
@@ -499,12 +500,12 @@ html, body {
   font-size: 9px;
   color: #777;
   font-family: 'SF Mono', 'Menlo', monospace;
-  padding: 0 2px 1px !important;
+  padding: 0 4px 1px !important;
   white-space: nowrap;
 }
 
 .taf-row-cat td {
-  padding: 1px 2px !important;
+  padding: 1px 4px !important;
 }
 
 .taf-hour {
@@ -531,7 +532,7 @@ html, body {
   font-family: 'SF Mono', 'Menlo', monospace;
   font-size: 10px;
   color: #666;
-  padding: 1px 2px !important;
+  padding: 1px 4px !important;
 }
 
 .taf-tempo-val {
@@ -1712,6 +1713,16 @@ html, body {
   color: #fff;
   margin-left: 3px;
   vertical-align: middle;
+}
+
+.taf-td-wind {
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.taf-wind-strong {
+  color: #e67e22;
+  font-weight: 700;
 }
 
 .taf-wind-dot {

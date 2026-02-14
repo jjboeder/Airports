@@ -1773,14 +1773,18 @@
       }
       html += '</tr>';
     }
-    // Wind row
-    var hasAnyWind = groups.some(function (g) { return isStrongWind(g.wspd, g.wgst); });
+    // Wind row — always show wind values
+    var hasAnyWind = groups.some(function (g) { return g.wspd != null; });
     if (hasAnyWind) {
       html += '<tr class="taf-row-data"><td class="taf-row-label">WND</td>';
       for (var i = 0; i < groups.length; i++) {
         var g = groups[i];
-        if (isStrongWind(g.wspd, g.wgst)) {
-          html += '<td class="taf-td-data"><span class="taf-wind-dot" title="' + escapeHtml(windTitle(g.wdir, g.wspd, g.wgst)) + '">' + WIND_SVG + '</span></td>';
+        if (g.wspd != null) {
+          var wStr = (g.wdir != null ? (g.wdir === 'VRB' ? 'VRB' : g.wdir + '\u00B0') + '/' : '') + g.wspd;
+          if (g.wgst) wStr += 'G' + g.wgst;
+          wStr += 'kt';
+          var strong = isStrongWind(g.wspd, g.wgst);
+          html += '<td class="taf-td-data taf-td-wind' + (strong ? ' taf-wind-strong' : '') + '">' + wStr + '</td>';
         } else {
           html += '<td class="taf-td-data"></td>';
         }
