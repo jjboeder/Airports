@@ -6,8 +6,8 @@
   // Airport type configuration: color and marker size
   var TYPE_CONFIG = {
     'large_airport':   { color: '#e74c3c', size: 12, label: 'Large airports', fontSize: 12, minZoom: 0 },
-    'medium_airport':  { color: '#3498db', size: 12, label: 'Medium airports', fontSize: 12, minZoom: 6 },
-    'small_airport':   { color: '#27ae60', size: 12, label: 'Small airports', fontSize: 12, minZoom: 8 }
+    'medium_airport':  { color: '#3498db', size: 12, label: 'Medium airports', fontSize: 12, minZoom: 5 },
+    'small_airport':   { color: '#27ae60', size: 12, label: 'Small airports', fontSize: 12, minZoom: 7 }
   };
 
   // Column indices in the array-of-arrays data format
@@ -807,37 +807,6 @@
     return OAIP_FREQ_TYPE_MAP[f.type] || f.name || 'COMM';
   }
 
-  // Update marker frequency data from OpenAIP (no popup needed)
-  function enrichFreqsFromOpenAip(icao, data) {
-    var oaipFreqs = data && data.frequencies;
-    if (!oaipFreqs || oaipFreqs.length === 0) return;
-    var newFreqs = [];
-    for (var i = 0; i < oaipFreqs.length; i++) {
-      newFreqs.push([oaipFreqLabel(oaipFreqs[i]), oaipFreqs[i].value]);
-    }
-    var app = window.AirportApp;
-    var marker = app && app.markersByIcao && app.markersByIcao[icao];
-    if (marker && marker._airportData) {
-      marker._airportData[COL.frequencies] = newFreqs;
-    }
-  }
-
-  // Fetch OpenAIP data for an airport and update marker frequencies (headless, no popup)
-  function fetchOpenAipFreqs(icao) {
-    var cached = openaipCache[icao];
-    if (cached && (Date.now() - cached.time < OPENAIP_CACHE_AGE)) {
-      if (cached.data) enrichFreqsFromOpenAip(icao, cached.data);
-      return;
-    }
-    fetch(OWM_PROXY + '/airport?icao=' + encodeURIComponent(icao))
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        openaipCache[icao] = { data: data, time: Date.now() };
-        if (data) enrichFreqsFromOpenAip(icao, data);
-      })
-      .catch(function () {});
-  }
-
   function fetchOpenAipForPopup(popupEl, icao) {
     var cached = openaipCache[icao];
     if (cached && (Date.now() - cached.time < OPENAIP_CACHE_AGE)) {
@@ -856,46 +825,6 @@
   function enrichInfoTab(popupEl, icao, data) {
     var infoGrid = popupEl.querySelector('.popup-info-grid');
     if (!infoGrid) return;
-
-    // 0. Replace frequencies with OpenAIP data (more accurate than OurAirports)
-    var oaipFreqs = data.frequencies;
-    if (oaipFreqs && oaipFreqs.length > 0) {
-      var newFreqs = [];
-      for (var fi = 0; fi < oaipFreqs.length; fi++) {
-        var of = oaipFreqs[fi];
-        newFreqs.push([oaipFreqLabel(of), of.value]);
-      }
-      // Update the marker data so route planner also picks up correct frequencies
-      var app = window.AirportApp;
-      var marker = app && app.markersByIcao && app.markersByIcao[icao];
-      if (marker && marker._airportData) {
-        marker._airportData[COL.frequencies] = newFreqs;
-      }
-      // Update popup freq display
-      var freqRow = infoGrid.querySelector('.info-row-freqs');
-      if (freqRow) {
-        var freqHtml = '<span class="info-label">Freq</span><span class="info-value freq-list">';
-        for (var fi = 0; fi < newFreqs.length; fi++) {
-          freqHtml += '<span class="freq-item">' + escapeHtml(newFreqs[fi][0]) + ' ' + newFreqs[fi][1] + '</span>';
-        }
-        freqHtml += '</span>';
-        freqRow.innerHTML = freqHtml;
-      } else if (newFreqs.length > 0) {
-        // No freq row existed (OurAirports had none) — add one after ATC row
-        var atcRow = infoGrid.querySelector('.info-row');
-        if (atcRow) {
-          var newRow = document.createElement('div');
-          newRow.className = 'info-row info-row-freqs';
-          var freqHtml = '<span class="info-label">Freq</span><span class="info-value freq-list">';
-          for (var fi = 0; fi < newFreqs.length; fi++) {
-            freqHtml += '<span class="freq-item">' + escapeHtml(newFreqs[fi][0]) + ' ' + newFreqs[fi][1] + '</span>';
-          }
-          freqHtml += '</span>';
-          newRow.innerHTML = freqHtml;
-          atcRow.insertAdjacentElement('afterend', newRow);
-        }
-      }
-    }
 
     // Find last existing row as insertion anchor
     var lastRow = null;
@@ -2481,7 +2410,6 @@
   window.AirportApp.parseNotamResponse = parseNotamResponse;
   window.AirportApp.isNotamStale = isNotamStale;
   window.AirportApp.rawTafCache = rawTafCache;
-  window.AirportApp.fetchOpenAipFreqs = fetchOpenAipFreqs;
 
   if (window.AirportApp.map && window.AirportApp.layerControl) {
     loadAirports();

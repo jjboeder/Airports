@@ -1045,8 +1045,6 @@
       if (!name && data) name = getName(data);
     }
     waypoints.push({ latlng: latlng, data: data, code: code, name: name || code });
-    // Fetch OpenAIP frequencies for airport waypoints (more accurate than OurAirports)
-    if (code && app && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(code);
     recalculate();
     renderRouteOnMap();
     renderPanel();
@@ -1103,9 +1101,6 @@
         name: getName(airportData)
       });
     }
-    // Fetch OpenAIP frequencies for airport waypoint
-    var app = window.AirportApp;
-    if (code && app && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(code);
     recalculate();
     renderRouteOnMap();
     renderPanel();
@@ -5118,7 +5113,6 @@
           code: arCode,
           name: getName(marker._airportData)
         });
-        if (arCode && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(arCode);
       } else {
         // IFR waypoint from autorouter (fix, VOR, NDB, etc.)
         // autorouter types: ARPT, INT, VOR, VORDME, VORTAC, NDB, NDBDME, DME, TACAN
@@ -5350,7 +5344,6 @@
         code: wp.code,
         name: wp.name
       });
-      if (wp.code && app.fetchOpenAipFreqs) app.fetchOpenAipFreqs(wp.code);
     }
     if (state.alternateIndex >= 0 && state.alternateIndex < waypoints.length) {
       alternateIndex = state.alternateIndex;
