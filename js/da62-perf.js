@@ -175,6 +175,48 @@
       ]
     },
 
+    // OEI (One Engine Inoperative) rate of climb (ft/min) — approximate, replace with AFM
+    // Gear up, prop feathered, Vyse (blue line) ~88 KIAS
+    // Service ceiling = altitude at 50 ft/min ROC
+    oeiVyse: 88, // KIAS
+    oeiROC: {
+      weights:   [1900, 2100, 2300],
+      pressAlts: [0, 2000, 4000, 6000, 8000, 10000, 12000],
+      oats:      [-10, 0, 10, 20, 30, 40],
+      data: [
+        // 1900 kg — service ceiling ~11,000 ft ISA
+        [
+          [530, 490, 450, 405, 360, 315],
+          [440, 400, 360, 315, 270, 225],
+          [355, 315, 275, 230, 185, 140],
+          [270, 230, 190, 150, 105, 60],
+          [190, 150, 110, 70, 25, -20],
+          [115, 75, 35, -5, -50, null],
+          [40, 0, -40, -80, -120, null]
+        ],
+        // 2100 kg — service ceiling ~9,000 ft ISA
+        [
+          [420, 380, 340, 295, 250, 205],
+          [335, 295, 255, 210, 165, 120],
+          [250, 210, 170, 130, 85, 40],
+          [170, 130, 90, 50, 5, -40],
+          [95, 55, 15, -25, -70, -115],
+          [20, -20, -60, -100, -145, null],
+          [-50, -90, -130, -170, -215, null]
+        ],
+        // 2300 kg — service ceiling ~7,500 ft ISA
+        [
+          [320, 280, 240, 200, 155, 110],
+          [240, 200, 160, 120, 75, 30],
+          [160, 120, 80, 40, -5, -50],
+          [85, 45, 5, -35, -80, -125],
+          [10, -30, -70, -110, -155, -200],
+          [-60, -100, -140, -180, -225, null],
+          [-130, -170, -210, -250, -295, null]
+        ]
+      ]
+    },
+
     // Wind correction factors (per knot)
     windCorrection: { headwindPerKt: -0.01, tailwindPerKt: 0.05 },
 
@@ -343,6 +385,41 @@
     };
   }
 
+  // OEI ceiling: find the pressure altitude where OEI ROC drops to 0 ft/min
+  // Uses bisection search between 0 and 15000 ft
+  function calcOeiCeiling(weightKg, oatC) {
+    var oat = (oatC != null) ? oatC : 15;
+    var lo = 0, hi = 15000;
+
+    // Check if we have positive ROC at sea level
+    var rocAtSL = interpolate3D(DA62_PERF.oeiROC, weightKg, 0, oat);
+    if (rocAtSL == null || rocAtSL <= 0) return 0; // can't climb even at sea level
+
+    // Bisection: find altitude where ROC = 0
+    for (var iter = 0; iter < 30; iter++) {
+      var mid = (lo + hi) / 2;
+      var roc = interpolate3D(DA62_PERF.oeiROC, weightKg, mid, oat);
+      if (roc == null) { hi = mid; continue; }
+      if (roc > 0) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+      if (hi - lo < 10) break;
+    }
+    return Math.round(lo / 100) * 100; // round to nearest 100 ft
+  }
+
+  // OEI performance summary for display
+  function calcOeiPerf(pressAlt, oat, weightKg) {
+    var roc = interpolate3D(DA62_PERF.oeiROC, weightKg, pressAlt, oat);
+    var ceiling = calcOeiCeiling(weightKg, oat);
+    return {
+      roc: roc != null ? Math.round(roc) : null,
+      ceiling: ceiling
+    };
+  }
+
   // Calculate performance for one runway end
   function calcRunwayPerf(rwyLenM, rwyHdg, surface, elevFt, metar, weightKg) {
     var qnh = metar ? metar.altim : 1013;
@@ -467,6 +544,21 @@
       if (metar.wgst) windStr += ' G' + metar.wgst + 'kt';
       html += '<div class="perf-wind">Wind: ' + windStr + '</div>';
     }
+
+    // OEI (single engine) performance
+    var oeiOat = oat != null ? oat : 15;
+    var oeiQnh = qnh || 1013;
+    var oei = calcOeiPerf(pressAlt, oeiOat, weightKg);
+    // Convert PA ceiling to MSL for display (AMA comparison uses MSL)
+    var oeiCeilMsl = Math.round(oei.ceiling - (1013.25 - oeiQnh) * 30);
+    html += '<div class="perf-oei">';
+    html += '<span class="perf-oei-title">Single Engine (OEI)</span>';
+    html += '<span class="perf-oei-data">';
+    html += 'Ceiling: <span class="' + (oeiCeilMsl < 5000 ? 'perf-warn' : '') + '">' + oeiCeilMsl + ' ft MSL</span>';
+    if (oei.roc != null) {
+      html += ' · ROC at field: <span class="' + (oei.roc <= 0 ? 'perf-warn' : '') + '">' + oei.roc + ' ft/min</span>';
+    }
+    html += '</span></div>';
 
     html += '</div>';
     el.innerHTML = html;
@@ -679,5 +771,6 @@
   window.AirportApp = window.AirportApp || {};
   window.AirportApp.renderPerfInPopup = renderPerfInPopup;
   window.AirportApp.DA62_PERF = DA62_PERF;
+  window.AirportApp.calcOeiCeiling = calcOeiCeiling;
 
 })();

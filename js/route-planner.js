@@ -760,6 +760,48 @@
     return warnings;
   }
 
+  // Check OEI ceiling against AMA on each leg
+  // OEI ceiling is pressure altitude; AMA is MSL — convert PA→MSL using QNH
+  // Returns array of {leg, maxAma, oeiCeilingMsl} where OEI ceiling MSL < AMA
+  function checkRouteOEI() {
+    var app = window.AirportApp;
+    if (!app.calcOeiCeiling) return [];
+
+    // Get weight from W&B DOM
+    var weightKg = 2300;
+    var wbResults = document.getElementById('wb-results');
+    if (wbResults) {
+      var m = (wbResults.textContent || '').match(/Ramp:\s*(\d+)\s*kg/);
+      if (m) weightKg = parseInt(m[1], 10);
+    }
+
+    // Get OAT and QNH from departure METAR, or use ISA/standard
+    var oat = 15;
+    var qnh = 1013;
+    if (waypoints.length > 0 && waypoints[0].code && app.metarCache) {
+      var depMetar = app.metarCache[waypoints[0].code];
+      if (depMetar) {
+        if (depMetar.temp != null) oat = depMetar.temp;
+        if (depMetar.altim != null) qnh = depMetar.altim;
+      }
+    }
+
+    // OEI ceiling is in pressure altitude — convert to MSL
+    var oeiCeilingPA = app.calcOeiCeiling(weightKg, oat);
+    var oeiCeilingMsl = Math.round(oeiCeilingPA - (1013.25 - qnh) * 30);
+
+    var warnings = [];
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i].latlng;
+      var b = waypoints[i + 1].latlng;
+      var maxAma = getLegMaxAMA(a.lat, a.lng, b.lat, b.lng);
+      if (maxAma > 0 && oeiCeilingMsl < maxAma) {
+        warnings.push({ leg: i, maxAma: maxAma, oeiCeilingMsl: oeiCeilingMsl });
+      }
+    }
+    return warnings;
+  }
+
   // --- Radio frequency helpers ---
 
   // Point-in-polygon (ray casting)
@@ -1546,7 +1588,31 @@
     if (profile) {
       var pctMatch = profile.label.match(/^(\d+%)/);
       var pct = pctMatch ? pctMatch[1] : '';
-      settingsDiv.textContent = 'Using ' + pct + ' power \u00B7 ' + fuel + ' gal';
+      var settingsText = 'Using ' + pct + ' power \u00B7 ' + fuel + ' gal';
+
+      // Add OEI ceiling (max altitude on one engine, converted to MSL)
+      if (app.calcOeiCeiling) {
+        var oeiWt = 2300;
+        var wbRes = document.getElementById('wb-results');
+        if (wbRes) {
+          var wm = (wbRes.textContent || '').match(/Ramp:\s*(\d+)\s*kg/);
+          if (wm) oeiWt = parseInt(wm[1], 10);
+        }
+        var oeiOat = 15;
+        var oeiQnh = 1013;
+        if (waypoints.length > 0 && waypoints[0].code && app.metarCache) {
+          var dm = app.metarCache[waypoints[0].code];
+          if (dm) {
+            if (dm.temp != null) oeiOat = dm.temp;
+            if (dm.altim != null) oeiQnh = dm.altim;
+          }
+        }
+        var oeiCeilPA = app.calcOeiCeiling(oeiWt, oeiOat);
+        var oeiCeilMsl = Math.round(oeiCeilPA - (1013.25 - oeiQnh) * 30);
+        settingsText += ' \u00B7 OEI ceiling ' + oeiCeilMsl + ' ft';
+      }
+
+      settingsDiv.textContent = settingsText;
     } else {
       settingsDiv.textContent = '';
     }
@@ -1802,6 +1868,23 @@
           thtml += '<br>' + escapeHtml(fromCode) + ' &rarr; ' + escapeHtml(toCode) + ': AMA ' + aw.maxAma + ' ft';
         }
         thtml += '</div>';
+      }
+
+      // OEI ceiling vs AMA warning
+      if (waypoints.length >= 2 && app.calcOeiCeiling) {
+        var oeiWarnLegs = checkRouteOEI();
+        if (oeiWarnLegs.length > 0) {
+          thtml += '<div class="route-oei-warning">';
+          thtml += '&#9888; Single engine ceiling below terrain:';
+          for (var ow = 0; ow < oeiWarnLegs.length; ow++) {
+            var ol = oeiWarnLegs[ow];
+            var oFrom = waypoints[ol.leg].code || ('WP' + (ol.leg + 1));
+            var oTo = waypoints[ol.leg + 1].code || ('WP' + (ol.leg + 2));
+            thtml += '<br>' + escapeHtml(oFrom) + ' &rarr; ' + escapeHtml(oTo);
+            thtml += ': AMA ' + ol.maxAma + ' ft · OEI ceiling ' + ol.oeiCeilingMsl + ' ft MSL';
+          }
+          thtml += '</div>';
+        }
       }
 
       // Icing warning placeholder (populated asynchronously alongside wind totals)
