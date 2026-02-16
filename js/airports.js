@@ -35,8 +35,8 @@
   var TAF_API = OWM_PROXY + '/taf';
   var AR_METARTAF_API = OWM_PROXY + '/ar/metartaf/';
 
-  // Lentopaikat.fi ICAO → slug mapping (loaded at startup)
-  var lentopaikatMap = null;
+  // Lentopaikat.fi ICAO → slug mapping
+  var lentopaikatMap = {"EFAA":"aavahelukka-efaa","EFAH":"ahmosuo-efah","EFAL":"alavus-efal","EFEU":"eura-efeu","EFFO":"forssa-effo","EFGE":"genbole-efge","EFHF":"helsinki-malmi-efhf","EFHL":"hailuoto-efhl","EFHM":"hameenkyro-efhm","EFHN":"hanko-efhn","EFHP":"haapavesi-efhp","EFHV":"hyvinkaa-efhv","EFII":"iisalmi-efii","EFIK":"kiikala-efik","EFIM":"immola-efim","EFIT":"kitee-efit","EFJM":"jamijarvi-efjm","EFJP":"jakalapaa-efjp","EFKA":"kauhava-efka","EFKG":"kumlinge-efkg","EFKH":"kuhmo-efkh","EFKJ":"kauhajoki-efkj","EFKM":"kemijarvi-efkm","EFKN":"kannus-efkn","EFKO":"kalajoki-efko","EFKR":"karsamaki-efkr","EFKV":"kivijarvi-efkv","EFKY":"kymi-efky","EFLA":"lahti-vesivehmaa-efla","EFLL":"lapinlahti-efll","EFLN":"lieksa-nurmes-efln","EFLP":"lappeenranta-eflp","EFME":"menkijarvi-efme","EFMN":"mantsala-efmn","EFMP":"martiniiskonpalo-efmp","EFNS":"savikko-efns","EFNU":"nummela-efnu","EFOP":"oripaa-efop","EFPA":"pokka-efpa","EFPI":"piikajarvi-efpi","EFPK":"pieksamaki-efpk","EFPN":"punkaharju-efpn","EFPR":"pyhtaa-redstone-efpr","EFPU":"pudasjarvi-efpu","EFPY":"pyhasalmi-efpy","EFRA":"rautavaara-efra","EFRH":"raahe-pattijoki-efrh","EFRN":"rantasalmi-efrn","EFRU":"ranua-efru","EFRV":"kiuruvesi-efrv","EFRY":"rayskala-efry","EFSE":"selanpaa-efse","EFSO":"sodankyla-efso","EFSU":"suomussalmi-efsu","EFTO":"torbacka-efto","EFTS":"teisko-efts","EFVI":"viitasaari-efvi","EFVL":"vaala-efvl","EFVP":"vampula-efvp","EFVR":"varkaus-efvr","EFVT":"sulkaharju-efvt","EFVU":"vuotso-efvu","EFWB":"wredeby-efwb","EFYL":"ylivieska-efyl"};
 
   // Shared METAR cache: icao → parsed metar object
   var metarCache = {};
@@ -1976,12 +1976,6 @@
     }
 
     var map = app.map;
-
-    // Load lentopaikat.fi slug mapping (optional, non-blocking)
-    fetch('data/lentopaikat.json')
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (json) { if (json) lentopaikatMap = json; })
-      .catch(function () { /* optional data, ignore errors */ });
 
     fetch('data/airports-eu.json')
       .then(function (res) {
