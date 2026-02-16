@@ -497,14 +497,16 @@ html, body {
 }
 
 .taf-td-label {
-  font-size: 9px;
-  color: #777;
+  font-size: 10px;
+  color: #555;
+  font-weight: 600;
   font-family: 'SF Mono', 'Menlo', monospace;
   padding: 0 4px 1px !important;
   white-space: nowrap;
 }
 
-.taf-row-cat td {
+.taf-row-cat td,
+.taf-row-tempo td {
   padding: 1px 4px !important;
 }
 
@@ -518,13 +520,9 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto;
 }
 
 .taf-hour-tempo {
-  height: 14px;
-  font-size: 9px;
-  font-weight: 600;
   opacity: 0.7;
 }
 
