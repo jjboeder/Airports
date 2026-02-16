@@ -1663,7 +1663,7 @@
       var g = groups[i];
       var cigStr = formatCeiling(g.ceiling);
       if (g.tempoCeiling != null && g.tempoCeiling !== g.ceiling) {
-        cigStr += '<span class="taf-tempo-val">/' + formatCeiling(g.tempoCeiling) + '</span>';
+        cigStr += ' <span class="taf-tempo-val">(' + formatCeiling(g.tempoCeiling) + ')</span>';
       }
       html += '<td class="taf-td-data">' + cigStr + '</td>';
     }
@@ -1674,7 +1674,7 @@
       var g = groups[i];
       var visStr = formatVisKm(g.visM);
       if (g.tempoVisM != null && g.tempoVisM !== g.visM) {
-        visStr += '<span class="taf-tempo-val">/' + formatVisKm(g.tempoVisM) + '</span>';
+        visStr += ' <span class="taf-tempo-val">(' + formatVisKm(g.tempoVisM) + ')</span>';
       }
       html += '<td class="taf-td-data">' + visStr + '</td>';
     }
@@ -1700,15 +1700,15 @@
       for (var i = 0; i < groups.length; i++) {
         var g = groups[i];
         if (g.wspd != null) {
-          var wStr = (g.wdir != null ? (g.wdir === 'VRB' ? 'VRB' : g.wdir + '\u00B0') + '/' : '') + g.wspd;
+          var wStr = (g.wdir != null ? (g.wdir === 'VRB' ? 'VRB' : g.wdir) + '/' : '') + g.wspd;
           if (g.wgst) wStr += 'G' + g.wgst;
-          wStr += 'kt';
           // Append TEMPO wind if different from base
           if (g.tempoWspd != null) {
-            var tWStr = '<span class="taf-tempo-val">/';
+            var tWStr = ' <span class="taf-tempo-val">(';
+            if (g.tempoWdir != null && g.tempoWdir !== g.wdir) tWStr += (g.tempoWdir === 'VRB' ? 'VRB' : g.tempoWdir) + '/';
             tWStr += g.tempoWspd;
             if (g.tempoWgst) tWStr += 'G' + g.tempoWgst;
-            tWStr += 'kt</span>';
+            tWStr += ')</span>';
             wStr += tWStr;
           }
           var strong = isStrongWind(g.wspd, g.wgst) || isStrongWind(g.tempoWspd, g.tempoWgst);
