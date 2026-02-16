@@ -1486,10 +1486,13 @@
       }
 
       // Compute worst-case TEMPO category/ceiling/vis across all TEMPO/PROB overlays (unfiltered)
-      // Also collect all weather strings and detect wind shear from active overlays
+      // Also collect all weather strings, TEMPO wind, and detect wind shear from active overlays
       var tempoCat = null;
       var tempoCeiling = null;
       var tempoVisM = null;
+      var tempoWspd = null;
+      var tempoWgst = null;
+      var tempoWdir = null;
       var allWx = [];
       var wsDesc = null; // wind shear description (first detected)
       if (wxStr) allWx.push(wxStr);
@@ -1510,10 +1513,20 @@
             tempoVisM = tVisM;
           }
         }
+        // Capture worst-case TEMPO wind (even when category doesn't change)
+        if (f.wspd != null && (tempoWspd === null || f.wspd > tempoWspd)) {
+          tempoWspd = f.wspd;
+          tempoWdir = f.wdir != null ? f.wdir : wdir;
+        }
+        if (f.wgst != null && (tempoWgst === null || f.wgst > tempoWgst)) tempoWgst = f.wgst;
         // Wind shear: compare base wind with TEMPO wind
         if (!wsDesc && (f.wspd != null || f.wdir != null)) {
           wsDesc = detectWindShear(wdir, wspd, f.wdir != null ? f.wdir : wdir, f.wspd != null ? f.wspd : wspd, f.wgst);
         }
+      }
+      // Only keep TEMPO wind if it actually differs from base wind
+      if (tempoWspd === wspd && tempoWgst === wgst && tempoWdir === wdir) {
+        tempoWspd = null; tempoWgst = null; tempoWdir = null;
       }
       // Deduplicate and join all weather phenomena
       var wxPhenomena = [];
@@ -1525,7 +1538,7 @@
       }
       var combinedWx = wxPhenomena.join(' ');
 
-      hours.push({ epoch: epoch, utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wdir: wdir, wspd: wspd, wgst: wgst, wxStr: combinedWx, tempoCat: tempoCat, tempoCeiling: tempoCeiling, tempoVisM: tempoVisM, wsDesc: wsDesc });
+      hours.push({ epoch: epoch, utcHour: utcHour, cat: cat, ceiling: ceiling, visM: visM, wdir: wdir, wspd: wspd, wgst: wgst, wxStr: combinedWx, tempoCat: tempoCat, tempoCeiling: tempoCeiling, tempoVisM: tempoVisM, tempoWspd: tempoWspd, tempoWgst: tempoWgst, tempoWdir: tempoWdir, wsDesc: wsDesc });
     }
 
     return hours;
@@ -1581,6 +1594,7 @@
         h.cat, h.tempoCat || '', h.ceiling, h.visM,
         h.tempoCeiling, h.tempoVisM,
         h.wspd, h.wgst, h.wdir,
+        h.tempoWspd, h.tempoWgst, h.tempoWdir,
         h.wxStr, h.wsDesc || '', iceRisk ? '1' : '0'
       ].join('|');
       if (current && current._sig === sig) {
@@ -1601,6 +1615,9 @@
           wdir: h.wdir,
           wspd: h.wspd,
           wgst: h.wgst,
+          tempoWspd: h.tempoWspd,
+          tempoWgst: h.tempoWgst,
+          tempoWdir: h.tempoWdir,
           wxStr: h.wxStr,
           wsDesc: h.wsDesc,
           iceRisk: iceRisk
@@ -1704,7 +1721,7 @@
       }
       html += '</tr>';
     }
-    // Wind row — always show wind values
+    // Wind row — always show wind values, with TEMPO wind as secondary
     var hasAnyWind = groups.some(function (g) { return g.wspd != null; });
     if (hasAnyWind) {
       html += '<tr class="taf-row-data"><td class="taf-row-label">WND</td>';
@@ -1714,7 +1731,15 @@
           var wStr = (g.wdir != null ? (g.wdir === 'VRB' ? 'VRB' : g.wdir + '\u00B0') + '/' : '') + g.wspd;
           if (g.wgst) wStr += 'G' + g.wgst;
           wStr += 'kt';
-          var strong = isStrongWind(g.wspd, g.wgst);
+          // Append TEMPO wind if different from base
+          if (g.tempoWspd != null) {
+            var tWStr = '<span class="taf-tempo-val">/';
+            tWStr += g.tempoWspd;
+            if (g.tempoWgst) tWStr += 'G' + g.tempoWgst;
+            tWStr += 'kt</span>';
+            wStr += tWStr;
+          }
+          var strong = isStrongWind(g.wspd, g.wgst) || isStrongWind(g.tempoWspd, g.tempoWgst);
           html += '<td class="taf-td-data taf-td-wind' + (strong ? ' taf-wind-strong' : '') + '">' + wStr + '</td>';
         } else {
           html += '<td class="taf-td-data"></td>';
