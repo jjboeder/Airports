@@ -1451,42 +1451,7 @@
       var wgst = active.wgst != null ? active.wgst : (initialBase && initialBase !== active ? initialBase.wgst : null);
       var wxStr = active.wxString || (initialBase && initialBase !== active ? initialBase.wxString : null) || '';
 
-      // Apply TEMPO/PROB overlays per AMC1 NCO.OP.160 rules (e) and (f)
-      for (var i = 0; i < fcsts.length; i++) {
-        var f = fcsts[i];
-        if (f.fcstChange !== 'TEMPO' && f.fcstChange !== 'PROB') continue;
-        if (f.timeFrom > epoch || (f.timeTo && f.timeTo <= epoch)) continue;
-
-        // Rule (f): PROB30/40 TEMPO → disregard entirely
-        if (f.fcstChange === 'TEMPO' && f.probability >= 30) continue;
-
-        // Rule (e): standalone TEMPO or PROB30/40
-        var tVisM = parseTafVisib(f.visib);
-        if (tVisM === null) tVisM = visM;
-        var tCeiling = tafCeiling(f.clouds);
-        if (tCeiling === null) tCeiling = ceiling;
-        var tCat = calcFlightCat(tCeiling, tVisM);
-
-        // Rule (e.3): improvement → disregard
-        if (catOrder.indexOf(tCat) <= catOrder.indexOf(cat)) continue;
-
-        // Rule (e.2): transient/showery only (TS, SH without persistent) → may ignore
-        if (!isPersistentWx(f.wxString)) continue;
-
-        // Persistent deterioration → apply (rule e.1)
-        cat = tCat;
-        ceiling = tCeiling;
-        visM = tVisM;
-
-        // Worst-case wind from overlays
-        if (f.wspd != null && (wspd === null || f.wspd > wspd)) wspd = f.wspd;
-        if (f.wgst != null && (wgst === null || f.wgst > wgst)) wgst = f.wgst;
-        // Merge weather strings from overlays
-        if (f.wxString) wxStr = wxStr ? wxStr + ' ' + f.wxString : f.wxString;
-      }
-
-      // Compute worst-case TEMPO category/ceiling/vis across all TEMPO/PROB overlays (unfiltered)
-      // Also collect all weather strings, TEMPO wind, and detect wind shear from active overlays
+      // Collect TEMPO/PROB overlay effects — show base and TEMPO separately for user clarity
       var tempoCat = null;
       var tempoCeiling = null;
       var tempoVisM = null;
@@ -1494,7 +1459,7 @@
       var tempoWgst = null;
       var tempoWdir = null;
       var allWx = [];
-      var wsDesc = null; // wind shear description (first detected)
+      var wsDesc = null;
       if (wxStr) allWx.push(wxStr);
       for (var i = 0; i < fcsts.length; i++) {
         var f = fcsts[i];
@@ -1506,20 +1471,27 @@
         var tCeiling = tafCeiling(f.clouds);
         if (tCeiling === null) tCeiling = ceiling;
         var tCat = calcFlightCat(tCeiling, tVisM);
-        if (catOrder.indexOf(tCat) > catOrder.indexOf(cat)) {
+        // Capture worst-case TEMPO category when different from base
+        if (tCat !== cat) {
           if (!tempoCat || catOrder.indexOf(tCat) > catOrder.indexOf(tempoCat)) {
             tempoCat = tCat;
-            tempoCeiling = tCeiling;
-            tempoVisM = tVisM;
           }
         }
-        // Capture worst-case TEMPO wind (even when category doesn't change)
+        // Capture worst TEMPO ceiling (lowest)
+        if (tCeiling !== null && tCeiling !== ceiling) {
+          if (tempoCeiling === null || tCeiling < tempoCeiling) tempoCeiling = tCeiling;
+        }
+        // Capture worst TEMPO visibility (lowest)
+        if (tVisM !== null && tVisM !== visM) {
+          if (tempoVisM === null || tVisM < tempoVisM) tempoVisM = tVisM;
+        }
+        // Capture worst-case TEMPO wind (strongest)
         if (f.wspd != null && (tempoWspd === null || f.wspd > tempoWspd)) {
           tempoWspd = f.wspd;
           tempoWdir = f.wdir != null ? f.wdir : wdir;
         }
         if (f.wgst != null && (tempoWgst === null || f.wgst > tempoWgst)) tempoWgst = f.wgst;
-        // Wind shear: compare base wind with TEMPO wind
+        // Wind shear detection
         if (!wsDesc && (f.wspd != null || f.wdir != null)) {
           wsDesc = detectWindShear(wdir, wspd, f.wdir != null ? f.wdir : wdir, f.wspd != null ? f.wspd : wspd, f.wgst);
         }
@@ -1690,7 +1662,7 @@
     for (var i = 0; i < groups.length; i++) {
       var g = groups[i];
       var cigStr = formatCeiling(g.ceiling);
-      if (g.tempoCat && g.tempoCeiling !== g.ceiling) {
+      if (g.tempoCeiling != null && g.tempoCeiling !== g.ceiling) {
         cigStr += '<span class="taf-tempo-val">/' + formatCeiling(g.tempoCeiling) + '</span>';
       }
       html += '<td class="taf-td-data">' + cigStr + '</td>';
@@ -1701,7 +1673,7 @@
     for (var i = 0; i < groups.length; i++) {
       var g = groups[i];
       var visStr = formatVisKm(g.visM);
-      if (g.tempoCat && g.tempoVisM !== g.visM) {
+      if (g.tempoVisM != null && g.tempoVisM !== g.visM) {
         visStr += '<span class="taf-tempo-val">/' + formatVisKm(g.tempoVisM) + '</span>';
       }
       html += '<td class="taf-td-data">' + visStr + '</td>';
