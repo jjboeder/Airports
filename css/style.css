@@ -676,6 +676,12 @@ html, body {
   border: 1px solid #42a5f5;
 }
 
+.map-link {
+  background: #fce4ec;
+  color: #b71c1c;
+  border: 1px solid #ef5350;
+}
+
 /* Charts toggle link */
 .popup-charts {
   margin: 4px 0 8px;

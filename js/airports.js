@@ -674,6 +674,7 @@
     html += '<a href="https://skyvector.com/airport/' + icaoEnc + '" target="_blank" rel="noopener" class="popup-link sv-link">SkyVector</a>';
     html += '<a href="https://ourairports.com/airports/' + icaoEnc + '/" target="_blank" rel="noopener" class="popup-link oa-link">OurAirports</a>';
     html += '<a href="https://www.windy.com/' + lat + '/' + lon + '?detail=true" target="_blank" rel="noopener" class="popup-link windy-link">Windy</a>';
+    html += '<a href="https://www.google.com/maps/@' + lat + ',' + lon + ',15z" target="_blank" rel="noopener" class="popup-link map-link">Map</a>';
     if (lentopaikatMap && lentopaikatMap[icaoRaw]) {
       html += '<a href="https://lentopaikat.fi/' + lentopaikatMap[icaoRaw] + '/" target="_blank" rel="noopener" class="popup-link lp-link">Lentopaikat</a>';
     }
@@ -2010,10 +2011,10 @@
           var runways = row[COL.runways] || [];
           if (runways.length === 0) continue;
 
-          // Check: at least one runway >= 800m (2625ft) with asphalt/concrete
+          // Check: at least one runway >= 700m (2297ft) with asphalt/concrete
           var hasQualifyingRunway = runways.some(function (r) {
             var len = r[RWY.length];
-            if (!len || len < 2625) return false;
+            if (!len || len < 2297) return false;
             var s = (r[RWY.surface] || '').toUpperCase();
             return s.indexOf('ASP') >= 0 || s.indexOf('CON') >= 0
               || s.indexOf('BIT') >= 0 || s.indexOf('PEM') >= 0
