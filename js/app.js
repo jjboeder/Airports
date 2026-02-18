@@ -2561,11 +2561,11 @@
     if (extraRows) html += extraRows;
     html += '</div>';
 
-    // 3-hourly horizontal timeline (every 3 hours)
+    // 6-hourly horizontal timeline (every 6 hours)
     var hourly = data.hourly;
     if (hourly && hourly.length > 0) {
       html += '<div class="wx-hourly">';
-      for (var i = 0; i < hourly.length && i < 18; i += 3) {
+      for (var i = 0; i < hourly.length && i < 36; i += 6) {
         var h = hourly[i];
         var hw = h.weather && h.weather[0];
         var hWind = msToKts(h.wind_speed);
